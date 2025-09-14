@@ -3,7 +3,7 @@ project_name: seqr
 builds:
   - id: seqr
     main: ./cmd/seqr
-    binary: seqr
+    binary: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     goos:
       - linux
       - darwin
@@ -16,10 +16,7 @@ builds:
 
 archives:
   - format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    replacements:
-      darwin: macOS
-      amd64: x86_64
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
     format_overrides:
       - goos: windows
         format: zip
