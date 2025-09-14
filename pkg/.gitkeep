@@ -1,0 +1,2 @@
+# This file ensures the pkg/ directory is tracked by git
+# The pkg/ directory will contain public library code

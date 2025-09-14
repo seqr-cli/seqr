@@ -1,0 +1,2 @@
+# This file ensures the internal/ directory is tracked by git
+# The internal/ directory will contain private application code

@@ -1,0 +1,699 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>config: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/seqr/seqr/internal/config/example.go (0.0%)</option>
+				
+				<option value="file1">github.com/seqr/seqr/internal/config/parser.go (83.7%)</option>
+				
+				<option value="file2">github.com/seqr/seqr/internal/config/types.go (100.0%)</option>
+				
+				<option value="file3">github.com/seqr/seqr/internal/config/validator.go (97.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package config
+
+// ExampleConfig returns a sample configuration for documentation and testing
+func ExampleConfig() *Config <span class="cov0" title="0">{
+        return &amp;Config{
+                Version: "1.0",
+                Commands: []Command{
+                        {
+                                Name:    "setup-database",
+                                Command: "docker",
+                                Args:    []string{"run", "-d", "--name", "test-db", "postgres:13"},
+                                Mode:    ModeKeepAlive,
+                                Env: map[string]string{
+                                        "POSTGRES_PASSWORD": "testpass",
+                                },
+                        },
+                        {
+                                Name:    "run-migrations",
+                                Command: "npm",
+                                Args:    []string{"run", "migrate"},
+                                Mode:    ModeOnce,
+                                WorkDir: "./backend",
+                        },
+                        {
+                                Name:    "start-server",
+                                Command: "npm",
+                                Args:    []string{"start"},
+                                Mode:    ModeKeepAlive,
+                                WorkDir: "./backend",
+                                Env: map[string]string{
+                                        "NODE_ENV": "development",
+                                        "PORT":     "3000",
+                                },
+                        },
+                },
+        }
+}</span>
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package config
+
+import (
+        "encoding/json"
+        "fmt"
+        "os"
+        "path/filepath"
+)
+
+// LoadFromFile loads and parses a configuration file
+func LoadFromFile(filename string) (*Config, error) <span class="cov8" title="1">{
+        // Validate filename is not empty
+        if filename == "" </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("config filename cannot be empty")
+        }</span>
+
+        // Clean and resolve the file path
+        <span class="cov8" title="1">cleanPath := filepath.Clean(filename)
+
+        // Check if file exists and get file info for better error messages
+        fileInfo, err := os.Stat(cleanPath)
+        if err != nil </span><span class="cov8" title="1">{
+                if os.IsNotExist(err) </span><span class="cov8" title="1">{
+                        return nil, fmt.Errorf("config file '%s' does not exist", cleanPath)
+                }</span>
+                <span class="cov0" title="0">if os.IsPermission(err) </span><span class="cov0" title="0">{
+                        return nil, fmt.Errorf("permission denied reading config file '%s'", cleanPath)
+                }</span>
+                <span class="cov0" title="0">return nil, fmt.Errorf("failed to access config file '%s': %w", cleanPath, err)</span>
+        }
+
+        // Check if it's actually a file (not a directory)
+        <span class="cov8" title="1">if fileInfo.IsDir() </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("'%s' is a directory, not a file", cleanPath)
+        }</span>
+
+        // Check file size - empty files and extremely large files
+        <span class="cov8" title="1">if fileInfo.Size() == 0 </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("config file '%s' is empty", cleanPath)
+        }</span>
+
+        // Reasonable size limit (1MB) to prevent memory issues
+        <span class="cov8" title="1">const maxFileSize = 1024 * 1024 // 1MB
+        if fileInfo.Size() &gt; maxFileSize </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("config file '%s' is too large (%d bytes), maximum allowed is %d bytes",
+                        cleanPath, fileInfo.Size(), maxFileSize)
+        }</span>
+
+        // Read the file
+        <span class="cov8" title="1">data, err := os.ReadFile(cleanPath)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to read config file '%s': %w", cleanPath, err)
+        }</span>
+
+        // Parse with enhanced error context
+        <span class="cov8" title="1">config, err := ParseJSON(data)
+        if err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("error parsing config file '%s': %w", cleanPath, err)
+        }</span>
+
+        <span class="cov8" title="1">return config, nil</span>
+}
+
+// ParseJSON parses JSON data into a Config struct
+func ParseJSON(data []byte) (*Config, error) <span class="cov8" title="1">{
+        // Check for empty data
+        if len(data) == 0 </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("configuration data is empty")
+        }</span>
+
+        <span class="cov8" title="1">var config Config
+
+        // Parse JSON with enhanced error handling
+        if err := json.Unmarshal(data, &amp;config); err != nil </span><span class="cov8" title="1">{
+                // Provide more specific error messages for common JSON issues
+                switch err := err.(type) </span>{
+                case *json.SyntaxError:<span class="cov8" title="1">
+                        return nil, fmt.Errorf("JSON syntax error at byte offset %d: %w", err.Offset, err)</span>
+                case *json.UnmarshalTypeError:<span class="cov8" title="1">
+                        return nil, fmt.Errorf("JSON type error: cannot unmarshal %s into field '%s' of type %s",
+                                err.Value, err.Field, err.Type)</span>
+                default:<span class="cov8" title="1">
+                        return nil, fmt.Errorf("failed to parse JSON: %w", err)</span>
+                }
+        }
+
+        // Validate the parsed configuration
+        <span class="cov8" title="1">if err := config.Validate(); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("configuration validation failed: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">return &amp;config, nil</span>
+}
+
+// DefaultConfigFile returns the default configuration file name
+func DefaultConfigFile() string <span class="cov8" title="1">{
+        return ".queue.json"
+}</span>
+
+// FileExists checks if a configuration file exists and is readable
+func FileExists(filename string) error <span class="cov8" title="1">{
+        if filename == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("filename cannot be empty")
+        }</span>
+
+        <span class="cov8" title="1">cleanPath := filepath.Clean(filename)
+
+        fileInfo, err := os.Stat(cleanPath)
+        if err != nil </span><span class="cov8" title="1">{
+                if os.IsNotExist(err) </span><span class="cov8" title="1">{
+                        return fmt.Errorf("file '%s' does not exist", cleanPath)
+                }</span>
+                <span class="cov0" title="0">if os.IsPermission(err) </span><span class="cov0" title="0">{
+                        return fmt.Errorf("permission denied accessing file '%s'", cleanPath)
+                }</span>
+                <span class="cov0" title="0">return fmt.Errorf("cannot access file '%s': %w", cleanPath, err)</span>
+        }
+
+        <span class="cov8" title="1">if fileInfo.IsDir() </span><span class="cov8" title="1">{
+                return fmt.Errorf("'%s' is a directory, not a file", cleanPath)
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package config
+
+import (
+        "encoding/json"
+        "fmt"
+)
+
+// Mode represents the execution mode for a command
+type Mode string
+
+const (
+        ModeOnce      Mode = "once"
+        ModeKeepAlive Mode = "keepAlive"
+)
+
+// Command represents a single command in the queue
+type Command struct {
+        Name    string            `json:"name"`
+        Command string            `json:"command"`
+        Args    []string          `json:"args,omitempty"`
+        Mode    Mode              `json:"mode"`
+        WorkDir string            `json:"workDir,omitempty"`
+        Env     map[string]string `json:"env,omitempty"`
+}
+
+// Config represents the complete queue configuration
+type Config struct {
+        Version  string    `json:"version"`
+        Commands []Command `json:"commands"`
+}
+
+// Validate performs basic validation on the configuration
+// For comprehensive validation, use the Validator type
+func (c *Config) Validate() error <span class="cov8" title="1">{
+        validator := NewValidator()
+        return validator.ValidateConfig(c)
+}</span>
+
+// Validate performs basic validation on a single command
+// For comprehensive validation, use the Validator type
+func (c *Command) Validate() error <span class="cov8" title="1">{
+        if c.Name == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("command name is required")
+        }</span>
+
+        <span class="cov8" title="1">if c.Command == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("command is required")
+        }</span>
+
+        <span class="cov8" title="1">if c.Mode != ModeOnce &amp;&amp; c.Mode != ModeKeepAlive </span><span class="cov8" title="1">{
+                return fmt.Errorf("mode must be either 'once' or 'keepAlive', got '%s'", c.Mode)
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for Mode validation
+func (m *Mode) UnmarshalJSON(data []byte) error <span class="cov8" title="1">{
+        var s string
+        if err := json.Unmarshal(data, &amp;s); err != nil </span><span class="cov8" title="1">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">mode := Mode(s)
+        if mode != ModeOnce &amp;&amp; mode != ModeKeepAlive </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid mode: %s", s)
+        }</span>
+
+        <span class="cov8" title="1">*m = mode
+        return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package config
+
+import (
+        "fmt"
+        "os"
+        "path/filepath"
+        "regexp"
+        "strings"
+)
+
+// ValidationError represents a validation error with context
+type ValidationError struct {
+        Field   string
+        Value   interface{}
+        Message string
+}
+
+func (e ValidationError) Error() string <span class="cov8" title="1">{
+        if e.Field != "" </span><span class="cov8" title="1">{
+                return fmt.Sprintf("validation error in field '%s': %s", e.Field, e.Message)
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("validation error: %s", e.Message)</span>
+}
+
+// ValidationErrors represents multiple validation errors
+type ValidationErrors []ValidationError
+
+func (e ValidationErrors) Error() string <span class="cov8" title="1">{
+        if len(e) == 0 </span><span class="cov8" title="1">{
+                return "no validation errors"
+        }</span>
+        <span class="cov8" title="1">if len(e) == 1 </span><span class="cov8" title="1">{
+                return e[0].Error()
+        }</span>
+
+        <span class="cov8" title="1">var messages []string
+        for _, err := range e </span><span class="cov8" title="1">{
+                messages = append(messages, err.Error())
+        }</span>
+        <span class="cov8" title="1">return fmt.Sprintf("multiple validation errors: %s", strings.Join(messages, "; "))</span>
+}
+
+// Validator provides comprehensive validation for configurations
+type Validator struct {
+        // Configuration options for validation behavior
+        StrictMode       bool // Enable strict validation rules
+        ValidateWorkDirs bool // Validate that work directories exist
+        ValidateCommands bool // Validate that commands exist in PATH
+}
+
+// NewValidator creates a new validator with default settings
+func NewValidator() *Validator <span class="cov8" title="1">{
+        return &amp;Validator{
+                StrictMode:       false,
+                ValidateWorkDirs: false,
+                ValidateCommands: false,
+        }
+}</span>
+
+// NewStrictValidator creates a validator with strict validation enabled
+func NewStrictValidator() *Validator <span class="cov8" title="1">{
+        return &amp;Validator{
+                StrictMode:       true,
+                ValidateWorkDirs: true,
+                ValidateCommands: false, // Command validation can be expensive, keep optional
+        }
+}</span>
+
+// ValidateConfig performs comprehensive validation on a configuration
+func (v *Validator) ValidateConfig(config *Config) error <span class="cov8" title="1">{
+        if config == nil </span><span class="cov8" title="1">{
+                return ValidationError{Message: "configuration cannot be nil"}
+        }</span>
+
+        <span class="cov8" title="1">var errors ValidationErrors
+
+        // Validate version
+        if err := v.validateVersion(config.Version); err != nil </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "version", Value: config.Version, Message: err.Error()})
+        }</span>
+
+        // Validate commands array
+        <span class="cov8" title="1">if err := v.validateCommandsArray(config.Commands); err != nil </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "commands", Message: err.Error()})
+        }</span>
+
+        // Validate individual commands
+        <span class="cov8" title="1">for i, cmd := range config.Commands </span><span class="cov8" title="1">{
+                if cmdErrors := v.validateCommand(&amp;cmd, i); len(cmdErrors) &gt; 0 </span><span class="cov8" title="1">{
+                        for _, cmdErr := range cmdErrors </span><span class="cov8" title="1">{
+                                cmdErr.Field = fmt.Sprintf("commands[%d].%s", i, cmdErr.Field)
+                                errors = append(errors, cmdErr)
+                        }</span>
+                }
+        }
+
+        // Validate command name uniqueness
+        <span class="cov8" title="1">if err := v.validateCommandNameUniqueness(config.Commands); err != nil </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "commands", Message: err.Error()})
+        }</span>
+
+        <span class="cov8" title="1">if len(errors) &gt; 0 </span><span class="cov8" title="1">{
+                return errors
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateVersion validates the configuration version
+func (v *Validator) validateVersion(version string) error <span class="cov8" title="1">{
+        if version == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("version is required")
+        }</span>
+
+        <span class="cov8" title="1">if v.StrictMode </span><span class="cov8" title="1">{
+                // In strict mode, validate version format (semantic versioning)
+                versionRegex := regexp.MustCompile(`^(\d+)\.(\d+)(?:\.(\d+))?(?:-([a-zA-Z0-9\-\.]+))?(?:\+([a-zA-Z0-9\-\.]+))?$`)
+                if !versionRegex.MatchString(version) </span><span class="cov8" title="1">{
+                        return fmt.Errorf("version '%s' is not a valid semantic version (expected format: X.Y or X.Y.Z)", version)
+                }</span>
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateCommandsArray validates the commands array structure
+func (v *Validator) validateCommandsArray(commands []Command) error <span class="cov8" title="1">{
+        if len(commands) == 0 </span><span class="cov8" title="1">{
+                return fmt.Errorf("at least one command is required")
+        }</span>
+
+        <span class="cov8" title="1">if v.StrictMode </span><span class="cov8" title="1">{
+                // In strict mode, limit the number of commands to prevent resource issues
+                const maxCommands = 50
+                if len(commands) &gt; maxCommands </span><span class="cov0" title="0">{
+                        return fmt.Errorf("too many commands (%d), maximum allowed is %d", len(commands), maxCommands)
+                }</span>
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateCommand performs comprehensive validation on a single command
+func (v *Validator) validateCommand(cmd *Command, index int) ValidationErrors <span class="cov8" title="1">{
+        var errors ValidationErrors
+
+        // Validate required fields
+        if cmd.Name == "" </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "name", Message: "command name is required"})
+        }</span>
+
+        <span class="cov8" title="1">if cmd.Command == "" </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "command", Message: "command is required"})
+        }</span>
+
+        // Validate name format
+        <span class="cov8" title="1">if cmd.Name != "" </span><span class="cov8" title="1">{
+                if err := v.validateCommandName(cmd.Name); err != nil </span><span class="cov0" title="0">{
+                        errors = append(errors, ValidationError{Field: "name", Value: cmd.Name, Message: err.Error()})
+                }</span>
+        }
+
+        // Validate command format
+        <span class="cov8" title="1">if cmd.Command != "" </span><span class="cov8" title="1">{
+                if err := v.validateCommandString(cmd.Command); err != nil </span><span class="cov8" title="1">{
+                        errors = append(errors, ValidationError{Field: "command", Value: cmd.Command, Message: err.Error()})
+                }</span>
+        }
+
+        // Validate mode
+        <span class="cov8" title="1">if err := v.validateMode(cmd.Mode); err != nil </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "mode", Value: cmd.Mode, Message: err.Error()})
+        }</span>
+
+        // Validate arguments
+        <span class="cov8" title="1">if err := v.validateArgs(cmd.Args); err != nil </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "args", Message: err.Error()})
+        }</span>
+
+        // Validate working directory
+        <span class="cov8" title="1">if cmd.WorkDir != "" </span><span class="cov8" title="1">{
+                if err := v.validateWorkDir(cmd.WorkDir); err != nil </span><span class="cov8" title="1">{
+                        errors = append(errors, ValidationError{Field: "workDir", Value: cmd.WorkDir, Message: err.Error()})
+                }</span>
+        }
+
+        // Validate environment variables
+        <span class="cov8" title="1">if err := v.validateEnv(cmd.Env); err != nil </span><span class="cov8" title="1">{
+                errors = append(errors, ValidationError{Field: "env", Message: err.Error()})
+        }</span>
+
+        <span class="cov8" title="1">return errors</span>
+}
+
+// validateCommandName validates command name format and content
+func (v *Validator) validateCommandName(name string) error <span class="cov8" title="1">{
+        // Basic validation
+        if len(name) &gt; 100 </span><span class="cov8" title="1">{
+                return fmt.Errorf("command name too long (%d characters), maximum is 100", len(name))
+        }</span>
+
+        <span class="cov8" title="1">if v.StrictMode </span><span class="cov8" title="1">{
+                // In strict mode, enforce naming conventions
+                nameRegex := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9\-_]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$`)
+                if !nameRegex.MatchString(name) </span><span class="cov8" title="1">{
+                        return fmt.Errorf("command name '%s' must contain only alphanumeric characters, hyphens, and underscores, and cannot start or end with special characters", name)
+                }</span>
+
+                // Check for reserved names
+                <span class="cov8" title="1">reservedNames := []string{"help", "version", "config", "init", "setup"}
+                for _, reserved := range reservedNames </span><span class="cov8" title="1">{
+                        if strings.EqualFold(name, reserved) </span><span class="cov8" title="1">{
+                                return fmt.Errorf("command name '%s' is reserved", name)
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateCommandString validates the command executable
+func (v *Validator) validateCommandString(command string) error <span class="cov8" title="1">{
+        if strings.TrimSpace(command) == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("command cannot be empty or whitespace only")
+        }</span>
+
+        <span class="cov8" title="1">if len(command) &gt; 500 </span><span class="cov8" title="1">{
+                return fmt.Errorf("command too long (%d characters), maximum is 500", len(command))
+        }</span>
+
+        <span class="cov8" title="1">if v.StrictMode </span><span class="cov8" title="1">{
+                // Check for potentially dangerous commands
+                dangerousCommands := []string{"rm", "del", "format", "fdisk", "mkfs", "dd"}
+                cmdLower := strings.ToLower(strings.TrimSpace(command))
+                for _, dangerous := range dangerousCommands </span><span class="cov8" title="1">{
+                        if cmdLower == dangerous </span><span class="cov8" title="1">{
+                                return fmt.Errorf("potentially dangerous command '%s' not allowed in strict mode", command)
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateMode validates the execution mode
+func (v *Validator) validateMode(mode Mode) error <span class="cov8" title="1">{
+        if mode != ModeOnce &amp;&amp; mode != ModeKeepAlive </span><span class="cov8" title="1">{
+                return fmt.Errorf("mode must be either 'once' or 'keepAlive', got '%s'", mode)
+        }</span>
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateArgs validates command arguments
+func (v *Validator) validateArgs(args []string) error <span class="cov8" title="1">{
+        if v.StrictMode </span><span class="cov8" title="1">{
+                // In strict mode, limit number of arguments
+                const maxArgs = 50
+                if len(args) &gt; maxArgs </span><span class="cov8" title="1">{
+                        return fmt.Errorf("too many arguments (%d), maximum allowed is %d", len(args), maxArgs)
+                }</span>
+
+                // Validate individual arguments
+                <span class="cov8" title="1">for i, arg := range args </span><span class="cov8" title="1">{
+                        if len(arg) &gt; 1000 </span><span class="cov8" title="1">{
+                                return fmt.Errorf("argument %d too long (%d characters), maximum is 1000", i, len(arg))
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateWorkDir validates working directory
+func (v *Validator) validateWorkDir(workDir string) error <span class="cov8" title="1">{
+        if strings.TrimSpace(workDir) == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("workDir cannot be empty or whitespace only")
+        }</span>
+
+        // Clean the path to normalize it
+        <span class="cov8" title="1">cleanPath := filepath.Clean(workDir)
+
+        if v.StrictMode </span><span class="cov8" title="1">{
+                // In strict mode, prevent potentially dangerous paths
+                if strings.Contains(cleanPath, "..") </span><span class="cov8" title="1">{
+                        return fmt.Errorf("workDir '%s' cannot contain parent directory references (..)", workDir)
+                }</span>
+
+                <span class="cov0" title="0">if filepath.IsAbs(cleanPath) &amp;&amp; !strings.HasPrefix(cleanPath, "/tmp") &amp;&amp; !strings.HasPrefix(cleanPath, "/var/tmp") </span>{<span class="cov0" title="0">
+                        // Allow absolute paths but warn about potential issues
+                        // This is a soft validation - we don't fail but could log a warning
+                }</span>
+        }
+
+        // If validation of actual directory existence is enabled
+        <span class="cov8" title="1">if v.ValidateWorkDirs </span><span class="cov8" title="1">{
+                if _, err := os.Stat(cleanPath); err != nil </span><span class="cov8" title="1">{
+                        if os.IsNotExist(err) </span><span class="cov8" title="1">{
+                                return fmt.Errorf("workDir '%s' does not exist", cleanPath)
+                        }</span>
+                        <span class="cov0" title="0">return fmt.Errorf("cannot access workDir '%s': %v", cleanPath, err)</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateEnv validates environment variables
+func (v *Validator) validateEnv(env map[string]string) error <span class="cov8" title="1">{
+        if v.StrictMode </span><span class="cov8" title="1">{
+                // In strict mode, limit number of environment variables
+                const maxEnvVars = 100
+                if len(env) &gt; maxEnvVars </span><span class="cov8" title="1">{
+                        return fmt.Errorf("too many environment variables (%d), maximum allowed is %d", len(env), maxEnvVars)
+                }</span>
+
+                // Validate environment variable names and values
+                <span class="cov8" title="1">envNameRegex := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+                for name, value := range env </span><span class="cov8" title="1">{
+                        if !envNameRegex.MatchString(name) </span><span class="cov8" title="1">{
+                                return fmt.Errorf("invalid environment variable name '%s': must start with letter or underscore, contain only alphanumeric characters and underscores", name)
+                        }</span>
+
+                        <span class="cov8" title="1">if len(name) &gt; 100 </span><span class="cov8" title="1">{
+                                return fmt.Errorf("environment variable name '%s' too long (%d characters), maximum is 100", name, len(name))
+                        }</span>
+
+                        <span class="cov8" title="1">if len(value) &gt; 10000 </span><span class="cov8" title="1">{
+                                return fmt.Errorf("environment variable '%s' value too long (%d characters), maximum is 10000", name, len(value))
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// validateCommandNameUniqueness ensures all command names are unique
+func (v *Validator) validateCommandNameUniqueness(commands []Command) error <span class="cov8" title="1">{
+        nameMap := make(map[string]int)
+
+        for i, cmd := range commands </span><span class="cov8" title="1">{
+                if cmd.Name == "" </span><span class="cov8" title="1">{
+                        continue</span> // Skip empty names, they'll be caught by other validation
+                }
+
+                <span class="cov8" title="1">if prevIndex, exists := nameMap[cmd.Name]; exists </span><span class="cov8" title="1">{
+                        return fmt.Errorf("duplicate command name '%s' found at positions %d and %d", cmd.Name, prevIndex, i)
+                }</span>
+                <span class="cov8" title="1">nameMap[cmd.Name] = i</span>
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>

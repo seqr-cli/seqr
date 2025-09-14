@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+  "commands": [
+    {
+      "name": "setup-database",
+      "command": "docker",
+      "args": [
+        "run",
+        "-d",
+        "--name",
+        "test-db",
+        "-p",
+        "5432:5432",
+        "postgres:13"
+      ],
+      "mode": "keepAlive",
+      "env": {
+        "POSTGRES_PASSWORD": "testpass",
+        "POSTGRES_DB": "testdb"
+      }
+    },
+    {
+      "name": "wait-for-db",
+      "command": "sleep",
+      "args": [
+        "3"
+      ],
+      "mode": "once"
+    },
+    {
+      "name": "run-migrations",
+      "command": "npm",
+      "args": [
+        "run",
+        "migrate"
+      ],
+      "mode": "once",
+      "workDir": "./backend"
+    },
+    {
+      "name": "start-api-server",
+      "command": "npm",
+      "args": [
+        "start"
+      ],
+      "mode": "keepAlive",
+      "workDir": "./backend",
+      "env": {
+        "NODE_ENV": "development",
+        "PORT": "3000",
+        "DATABASE_URL": "postgresql://postgres:testpass@localhost:5432/testdb"
+      }
+    },
+    {
+      "name": "start-frontend",
+      "command": "npm",
+      "args": [
+        "run",
+        "dev"
+      ],
+      "mode": "keepAlive",
+      "workDir": "./frontend",
+      "env": {
+        "VITE_API_URL": "http://localhost:3000"
+      }
+    }
+  ]
+}
