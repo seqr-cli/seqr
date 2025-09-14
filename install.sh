@@ -1,23 +1,17 @@
 #!/bin/bash
 
-# seqr installation script
-# Usage: curl -sSL https://raw.githubusercontent.com/seqr-cli/seqr/main/install.sh | bash
-
 set -e
 
-# Configuration
 REPO="seqr-cli/seqr"
 BINARY_NAME="seqr"
 DEFAULT_INSTALL_DIR="/usr/local/bin"
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Helper functions
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
@@ -34,7 +28,6 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Detect OS and architecture
 detect_platform() {
     local os arch
     
@@ -70,37 +63,31 @@ detect_platform() {
     echo "${os}-${arch}"
 }
 
-# Determine the best installation directory
 determine_install_dir() {
     local install_dir
-
-    # Check if default directory is in PATH and writable
+    local os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    if [[ $os == *"mingw"* || $os == *"msys"* || $os == *"cygwin"* ]]; then
+        DEFAULT_INSTALL_DIR="$HOME/bin"
+    fi
     if [[ ":$PATH:" == *":$DEFAULT_INSTALL_DIR:"* ]] && [ -w "$DEFAULT_INSTALL_DIR" ]; then
         install_dir="$DEFAULT_INSTALL_DIR"
     elif [[ ":$PATH:" == *":$DEFAULT_INSTALL_DIR:"* ]] && [ -d "$DEFAULT_INSTALL_DIR" ]; then
-        # Directory exists and is in PATH but not writable
         install_dir="$DEFAULT_INSTALL_DIR"
     else
-        # Try user-specific directories
         local user_dirs=("$HOME/bin" "$HOME/.local/bin")
-
         for dir in "${user_dirs[@]}"; do
             if [[ ":$PATH:" == *":$dir:"* ]] || [ -d "$dir" ]; then
                 install_dir="$dir"
                 break
             fi
         done
-
-        # If no suitable directory found, use $HOME/bin
         if [ -z "$install_dir" ]; then
             install_dir="$HOME/bin"
         fi
     fi
-
     echo "$install_dir"
 }
 
-# Get the latest release version
 get_latest_version() {
     local version
     version=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
@@ -113,9 +100,8 @@ get_latest_version() {
     echo "$version"
 }
 
-# Download and install seqr
 install_seqr() {
-    local platform version binary_name download_url temp_dir install_dir
+    local platform version binary_name download_url temp_dir install_dir final_name
 
     platform=$(detect_platform)
     version=$(get_latest_version)
@@ -125,29 +111,32 @@ install_seqr() {
     log_info "Latest version: $version"
     log_info "Install directory: $install_dir"
     
-    # Determine binary name and download URL
     if [[ "$platform" == *"windows"* ]]; then
         binary_name="${BINARY_NAME}-${platform}.exe"
         archive_name="${BINARY_NAME}-${platform}.zip"
         download_url="https://github.com/${REPO}/releases/download/${version}/${archive_name}"
+        final_name="${BINARY_NAME}.exe"
     else
         binary_name="${BINARY_NAME}-${platform}"
         download_url="https://github.com/${REPO}/releases/download/${version}/${binary_name}.tar.gz"
+        final_name="$BINARY_NAME"
     fi
     
     log_info "Downloading $binary_name..."
     
-    # Create temporary directory
     temp_dir=$(mktemp -d)
     cd "$temp_dir"
     
-    # Download the binary
-    if ! curl -sL "$download_url" -o "archive"; then
+    if ! curl -fsL "$download_url" -o "archive"; then
         log_error "Failed to download $download_url"
         exit 1
     fi
     
-    # Extract the binary
+    if [ ! -s archive ]; then
+        log_error "Downloaded file is empty"
+        exit 1
+    fi
+    
     if [[ "$platform" == *"windows"* ]]; then
         unzip -q archive
         binary_path="$binary_name"
@@ -156,36 +145,29 @@ install_seqr() {
         binary_path="$binary_name"
     fi
     
-    # Check if binary exists
     if [ ! -f "$binary_path" ]; then
         log_error "Binary not found in archive"
         exit 1
     fi
     
-    # Make binary executable
     chmod +x "$binary_path"
     
-    # Create install directory if it doesn't exist
     if [ ! -d "$install_dir" ]; then
         log_info "Creating directory $install_dir..."
         mkdir -p "$install_dir"
     fi
 
-    # Install binary
-    log_info "Installing to $install_dir/$BINARY_NAME..."
+    log_info "Installing to $install_dir/$final_name..."
 
     if [ -w "$install_dir" ]; then
-        mv "$binary_path" "$install_dir/$BINARY_NAME"
+        mv "$binary_path" "$install_dir/$final_name"
     else
         log_info "Requesting sudo access to install to $install_dir..."
-        sudo mv "$binary_path" "$install_dir/$BINARY_NAME"
+        sudo mv "$binary_path" "$install_dir/$final_name"
     fi
     
-    # Check if install directory is in PATH
     if [[ ":$PATH:" != *":$install_dir:"* ]]; then
         log_warning "Install directory $install_dir is not in PATH"
-
-        # Try to add to shell profile
         local shell_profile
         if [[ "$SHELL" == *"zsh"* ]]; then
             shell_profile="$HOME/.zshrc"
@@ -194,7 +176,6 @@ install_seqr() {
         else
             shell_profile="$HOME/.profile"
         fi
-
         if [ -w "$shell_profile" ] || [ ! -f "$shell_profile" ]; then
             log_info "Adding $install_dir to PATH in $shell_profile..."
             echo "export PATH=\"$install_dir:\$PATH\"" >> "$shell_profile"
@@ -205,14 +186,12 @@ install_seqr() {
         fi
     fi
 
-    # Cleanup
     cd - > /dev/null
     rm -rf "$temp_dir"
 
     log_success "seqr installed successfully!"
     log_info "Run 'seqr --help' to get started"
     
-    # Verify installation
     if command -v seqr >/dev/null 2>&1; then
         log_success "Installation verified: $(seqr --version)"
     else
@@ -228,16 +207,26 @@ install_seqr() {
     fi
 }
 
-# Check dependencies
 check_dependencies() {
     local missing_deps=()
+    local os
+    case "$(uname -s)" in
+        Darwin*) os="darwin" ;;
+        Linux*) os="linux" ;;
+        CYGWIN*|MINGW*|MSYS*) os="windows" ;;
+        *) os="unknown" ;;
+    esac
     
     if ! command -v curl >/dev/null 2>&1; then
         missing_deps+=("curl")
     fi
     
-    if ! command -v tar >/dev/null 2>&1; then
+    if [[ "$os" != "windows" ]] && ! command -v tar >/dev/null 2>&1; then
         missing_deps+=("tar")
+    fi
+    
+    if [[ "$os" == "windows" ]] && ! command -v unzip >/dev/null 2>&1; then
+        missing_deps+=("unzip")
     fi
     
     if [[ "${#missing_deps[@]}" -gt 0 ]]; then
@@ -247,7 +236,6 @@ check_dependencies() {
     fi
 }
 
-# Main installation function
 main() {
     log_info "Installing seqr - Sequential Command Queue Runner"
     echo
@@ -277,5 +265,4 @@ main() {
     echo '  }'
 }
 
-# Run main function
 main "$@"
