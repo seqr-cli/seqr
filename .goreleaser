@@ -1,0 +1,31 @@
+project_name: seqr
+
+builds:
+  - id: seqr
+    main: ./cmd/seqr
+    binary: seqr
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - "-s -w -X main.version={{.Version}}"
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    replacements:
+      darwin: macOS
+      amd64: x86_64
+    format_overrides:
+      - goos: windows
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  use: git

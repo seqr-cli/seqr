@@ -1,5 +1,3 @@
-# seqr - Hackathon build
-
 BINARY_NAME=seqr
 
 .PHONY: all build test clean dev
