@@ -2,6 +2,18 @@
 
 Run commands in sequence. Perfect for development workflows.
 
+## Installation
+
+### Via Go (recommended for Go users)
+```bash
+go install github.com/seqr-cli/seqr/cmd/seqr@latest
+```
+
+### Via installer script
+```bash
+curl -sSL https://raw.githubusercontent.com/seqr-cli/seqr/main/install.sh | bash
+```
+
 ## Usage
 
 ```bash
@@ -65,6 +77,7 @@ Create a `.queue.json` file:
 
 ```bash
 make build    # Build binary
+make install  # Build and install binary to /usr/local/bin
 make test     # Run tests
 make dev      # Run from source
 ```
