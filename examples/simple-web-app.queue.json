@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "commands": [
+    {
+      "name": "install-dependencies",
+      "command": "npm",
+      "args": [
+        "install"
+      ],
+      "mode": "once"
+    },
+    {
+      "name": "build-assets",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "mode": "once"
+    },
+    {
+      "name": "start-server",
+      "command": "npm",
+      "args": [
+        "start"
+      ],
+      "mode": "keepAlive",
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": "3000"
+      }
+    }
+  ]
+}

@@ -15,13 +15,14 @@ type CLIOptions struct {
 	ConfigFile string // Path to queue configuration file
 	Verbose    bool   // Enable verbose output
 	Help       bool   // Show help message
+	Version    bool   // Show version information
 }
 
 // CLI represents the command-line interface
 type CLI struct {
 	options  CLIOptions
 	flagSet  *flag.FlagSet
-	executor executor.Executor
+	executor *executor.Executor
 	args     []string
 }
 
@@ -37,6 +38,7 @@ func NewCLI(args []string) *CLI {
 			ConfigFile: config.DefaultConfigFile(), // ".queue.json"
 			Verbose:    false,
 			Help:       false,
+			Version:    false,
 		},
 		flagSet: flagSet,
 		args:    args,
@@ -56,6 +58,8 @@ func (c *CLI) setupFlags() {
 		"Show help message")
 	c.flagSet.BoolVar(&c.options.Help, "help", c.options.Help,
 		"Show help message")
+	c.flagSet.BoolVar(&c.options.Version, "version", c.options.Version,
+		"Show version information")
 }
 
 // Parse parses command-line arguments and validates options
@@ -69,8 +73,8 @@ func (c *CLI) Parse() error {
 
 // validateOptions validates the parsed command-line options
 func (c *CLI) validateOptions() error {
-	// If help is requested, no validation needed
-	if c.options.Help {
+	// If help or version is requested, no validation needed
+	if c.options.Help || c.options.Version {
 		return nil
 	}
 
@@ -91,9 +95,22 @@ func (c *CLI) ShouldShowHelp() bool {
 	return c.options.Help
 }
 
+// ShouldShowVersion returns true if version should be displayed
+func (c *CLI) ShouldShowVersion() bool {
+	return c.options.Version
+}
+
+// ShowVersion displays version information
+func (c *CLI) ShowVersion(version string) {
+	fmt.Fprintf(os.Stdout, "seqr version %s\n", version)
+}
+
 // ShowHelp displays the help message
 func (c *CLI) ShowHelp() {
 	fmt.Fprintf(os.Stdout, "seqr - AI-Safe Command Queue Runner\n\n")
+	fmt.Fprintf(os.Stdout, "DESCRIPTION:\n")
+	fmt.Fprintf(os.Stdout, "  Execute commands sequentially from a JSON configuration file.\n")
+	fmt.Fprintf(os.Stdout, "  Supports both one-time commands and long-running background processes.\n\n")
 	fmt.Fprintf(os.Stdout, "USAGE:\n")
 	fmt.Fprintf(os.Stdout, "  seqr [options]\n\n")
 	fmt.Fprintf(os.Stdout, "OPTIONS:\n")
@@ -102,7 +119,29 @@ func (c *CLI) ShowHelp() {
 	fmt.Fprintf(os.Stdout, "  seqr                    # Run commands from .queue.json\n")
 	fmt.Fprintf(os.Stdout, "  seqr -f my-queue.json   # Run commands from custom file\n")
 	fmt.Fprintf(os.Stdout, "  seqr -v                 # Run with verbose output\n")
-	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v   # Custom file with verbose output\n")
+	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v   # Custom file with verbose output\n\n")
+	fmt.Fprintf(os.Stdout, "CONFIGURATION:\n")
+	fmt.Fprintf(os.Stdout, "  The queue file should be a JSON file with the following structure:\n")
+	fmt.Fprintf(os.Stdout, "  {\n")
+	fmt.Fprintf(os.Stdout, "    \"version\": \"1.0\",\n")
+	fmt.Fprintf(os.Stdout, "    \"commands\": [\n")
+	fmt.Fprintf(os.Stdout, "      {\n")
+	fmt.Fprintf(os.Stdout, "        \"name\": \"command-name\",\n")
+	fmt.Fprintf(os.Stdout, "        \"command\": \"executable\",\n")
+	fmt.Fprintf(os.Stdout, "        \"args\": [\"arg1\", \"arg2\"],\n")
+	fmt.Fprintf(os.Stdout, "        \"mode\": \"once|keepAlive\",\n")
+	fmt.Fprintf(os.Stdout, "        \"workDir\": \"./path\" (optional),\n")
+	fmt.Fprintf(os.Stdout, "        \"env\": {\"KEY\": \"value\"} (optional)\n")
+	fmt.Fprintf(os.Stdout, "      }\n")
+	fmt.Fprintf(os.Stdout, "    ]\n")
+	fmt.Fprintf(os.Stdout, "  }\n\n")
+	fmt.Fprintf(os.Stdout, "EXECUTION MODES:\n")
+	fmt.Fprintf(os.Stdout, "  once      - Run command once and wait for completion\n")
+	fmt.Fprintf(os.Stdout, "  keepAlive - Start command and keep running in background\n\n")
+	fmt.Fprintf(os.Stdout, "EXIT CODES:\n")
+	fmt.Fprintf(os.Stdout, "  0 - All commands executed successfully\n")
+	fmt.Fprintf(os.Stdout, "  1 - Command execution failed or configuration error\n")
+	fmt.Fprintf(os.Stdout, "  2 - Invalid command-line arguments\n")
 }
 
 // Run executes the CLI application with the parsed options
@@ -120,14 +159,21 @@ func (c *CLI) Run(ctx context.Context) error {
 	}
 
 	// Create executor with CLI options
-	executorOpts := executor.ExecutorOptions{
-		Verbose: c.options.Verbose,
-	}
-	c.executor = executor.NewExecutor(executorOpts)
+	c.executor = executor.NewExecutor(c.options.Verbose)
 
 	// Execute the command queue
 	if err := c.executor.Execute(ctx, cfg); err != nil {
 		return fmt.Errorf("execution failed: %w", err)
+	}
+
+	// Wait for context cancellation if there might be keepAlive processes
+	select {
+	case <-ctx.Done():
+		if c.options.Verbose {
+			fmt.Println("Received termination signal, shutting down...")
+		}
+	default:
+		// All commands completed
 	}
 
 	return nil

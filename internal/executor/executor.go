@@ -12,39 +12,20 @@ import (
 	"github.com/seqr-cli/seqr/internal/config"
 )
 
-// sequentialExecutor implements the Executor interface with sequential command execution
-type sequentialExecutor struct {
-	mu             sync.RWMutex
-	status         ExecutionStatus
-	options        ExecutorOptions
-	stopped        bool
-	keepAliveProcs map[string]*exec.Cmd // Track keepAlive processes by command name
-	reporter       Reporter             // Reporter for execution output
-	processManager ProcessManager       // Process manager for advanced process handling
+type Executor struct {
+	mu        sync.RWMutex
+	status    ExecutionStatus
+	verbose   bool
+	stopped   bool
+	processes map[string]*exec.Cmd
+	reporter  Reporter
 }
 
-// NewExecutor creates a new sequential executor with the provided options
-func NewExecutor(opts ExecutorOptions) Executor {
-	// Use provided reporter or default to console reporter
-	reporter := opts.Reporter
-	if reporter == nil {
-		reporter = NewConsoleReporter(os.Stdout, opts.Verbose)
-	}
-
-	// Create process manager with the same options
-	pmOpts := ProcessManagerOptions{
-		Verbose:    opts.Verbose,
-		WorkingDir: opts.WorkingDir,
-		Timeout:    opts.Timeout,
-		Reporter:   reporter,
-	}
-	processManager := NewProcessManager(pmOpts)
-
-	return &sequentialExecutor{
-		options:        opts,
-		keepAliveProcs: make(map[string]*exec.Cmd),
-		reporter:       reporter,
-		processManager: processManager,
+func NewExecutor(verbose bool) *Executor {
+	return &Executor{
+		verbose:   verbose,
+		processes: make(map[string]*exec.Cmd),
+		reporter:  NewConsoleReporter(os.Stdout, verbose),
 		status: ExecutionStatus{
 			State:   StateReady,
 			Results: make([]ExecutionResult, 0),
@@ -52,102 +33,89 @@ func NewExecutor(opts ExecutorOptions) Executor {
 	}
 }
 
-func (e *sequentialExecutor) Execute(ctx context.Context, cfg *config.Config) error {
-	if err := e.validateExecutionInput(cfg); err != nil {
-		return err
+func (e *Executor) Execute(ctx context.Context, cfg *config.Config) error {
+	if len(cfg.Commands) == 0 {
+		return fmt.Errorf("no commands to execute")
 	}
 
-	e.initializeExecution(cfg)
+	e.mu.Lock()
+	e.status = ExecutionStatus{
+		State:      StateReady,
+		TotalCount: len(cfg.Commands),
+		Results:    make([]ExecutionResult, 0, len(cfg.Commands)),
+	}
+	e.stopped = false
+	e.mu.Unlock()
+
 	e.reporter.ReportStart(len(cfg.Commands))
 
 	for i, cmd := range cfg.Commands {
-		if err := e.checkExecutionPreconditions(ctx); err != nil {
+		if e.isStopped() {
+			return fmt.Errorf("execution stopped")
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		e.updateCurrentCommand(&cmd)
+		e.reporter.ReportCommandStart(cmd.Name, i)
+
+		result, err := e.executeCommand(ctx, cmd)
+		e.addResult(result)
+
+		if err != nil {
+			e.reporter.ReportCommandFailure(result, i)
+			e.updateState(StateFailed, err.Error())
 			return err
 		}
 
-		if err := e.executeAndReportCommand(ctx, cmd, i); err != nil {
-			e.handleExecutionFailure(err, i+1, len(cfg.Commands))
-			return err
-		}
-
+		e.reporter.ReportCommandSuccess(result, i)
 		e.updateCompletedCount(i + 1)
 	}
 
-	e.completeExecution()
+	e.updateState(StateSuccess, "")
+	status := e.GetStatus()
+	e.reporter.ReportExecutionComplete(status)
 	return nil
 }
 
-// GetStatus returns the current execution status
-func (e *sequentialExecutor) GetStatus() ExecutionStatus {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-
-	// Create a copy to avoid race conditions
-	status := e.status
-	status.Results = make([]ExecutionResult, len(e.status.Results))
-	copy(status.Results, e.status.Results)
-
-	return status
-}
-
-func (e *sequentialExecutor) Stop() {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.stopped = true
-
-	// Use process manager to terminate processes if available
-	if e.processManager != nil {
-		e.processManager.TerminateAll()
-		e.processManager.StopHealthMonitoring()
-	} else {
-		// Fallback to legacy termination
-		e.terminateAllKeepAliveProcesses()
-	}
-
-	e.keepAliveProcs = make(map[string]*exec.Cmd)
-}
-
-func (e *sequentialExecutor) terminateAllKeepAliveProcesses() {
-	for name, cmd := range e.keepAliveProcs {
-		e.terminateKeepAliveProcess(name, cmd)
-	}
-}
-
-func (e *sequentialExecutor) terminateKeepAliveProcess(name string, cmd *exec.Cmd) {
-	if cmd.Process == nil {
-		return
-	}
-
-	if e.options.Verbose {
-		fmt.Fprintf(os.Stderr, "Terminating keepAlive process '%s' (PID %d)\n", name, cmd.Process.Pid)
-	}
-	cmd.Process.Kill()
-}
-
-func (e *sequentialExecutor) executeCommand(ctx context.Context, cmd config.Command) (ExecutionResult, error) {
-	// Use the process manager for command execution if available
-	if e.processManager != nil {
-		return e.processManager.ExecuteCommand(ctx, cmd)
-	}
-
-	// Fallback to legacy implementation
+func (e *Executor) executeCommand(ctx context.Context, cmd config.Command) (ExecutionResult, error) {
 	result := ExecutionResult{
 		Command:   cmd,
 		StartTime: time.Now(),
 	}
 
+	execCmd := exec.CommandContext(ctx, cmd.Command, cmd.Args...)
+
+	if cmd.WorkDir != "" {
+		execCmd.Dir = cmd.WorkDir
+	}
+
+	if len(cmd.Env) > 0 {
+		execCmd.Env = os.Environ()
+		for key, value := range cmd.Env {
+			execCmd.Env = append(execCmd.Env, fmt.Sprintf("%s=%s", key, value))
+		}
+	}
+
 	switch cmd.Mode {
 	case config.ModeOnce:
-		return e.executeOnceCommand(ctx, cmd, result)
+		return e.executeOnce(execCmd, result)
 	case config.ModeKeepAlive:
-		return e.executeKeepAliveCommand(ctx, cmd, result)
+		return e.executeKeepAlive(execCmd, result, cmd.Name)
 	default:
-		return e.handleUnsupportedMode(cmd, result)
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Success = false
+		result.Error = fmt.Sprintf("unsupported mode: %s", cmd.Mode)
+		return result, fmt.Errorf("unsupported mode: %s", cmd.Mode)
 	}
 }
 
-func (e *sequentialExecutor) executeOnceCommand(ctx context.Context, cmd config.Command, result ExecutionResult) (ExecutionResult, error) {
-	execCmd := e.prepareCommand(ctx, cmd)
+func (e *Executor) executeOnce(execCmd *exec.Cmd, result ExecutionResult) (ExecutionResult, error) {
 	output, err := execCmd.CombinedOutput()
 
 	result.EndTime = time.Now()
@@ -155,7 +123,14 @@ func (e *sequentialExecutor) executeOnceCommand(ctx context.Context, cmd config.
 	result.Output = strings.TrimSpace(string(output))
 
 	if err != nil {
-		return e.handleCommandFailure(cmd, execCmd, result, err, string(output))
+		result.Success = false
+		result.Error = err.Error()
+		if exitError, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitError.ExitCode()
+		} else {
+			result.ExitCode = -1
+		}
+		return result, err
 	}
 
 	result.Success = true
@@ -163,74 +138,89 @@ func (e *sequentialExecutor) executeOnceCommand(ctx context.Context, cmd config.
 	return result, nil
 }
 
-func (e *sequentialExecutor) executeKeepAliveCommand(ctx context.Context, cmd config.Command, result ExecutionResult) (ExecutionResult, error) {
-	execCmd := e.prepareCommand(ctx, cmd)
+func (e *Executor) executeKeepAlive(execCmd *exec.Cmd, result ExecutionResult, name string) (ExecutionResult, error) {
 	err := execCmd.Start()
 
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
 
 	if err != nil {
-		return e.handleKeepAliveStartupFailure(cmd, execCmd, result, err)
+		result.Success = false
+		result.Error = err.Error()
+		result.ExitCode = -1
+		return result, err
 	}
 
-	e.trackKeepAliveProcess(cmd.Name, execCmd)
+	e.mu.Lock()
+	e.processes[name] = execCmd
+	e.mu.Unlock()
+
+	go e.monitorProcess(name, execCmd)
 
 	result.Success = true
 	result.ExitCode = 0
-	result.Output = fmt.Sprintf("keepAlive process started with PID %d", execCmd.Process.Pid)
-
+	result.Output = fmt.Sprintf("started with PID %d", execCmd.Process.Pid)
 	return result, nil
 }
 
-func (e *sequentialExecutor) monitorKeepAliveProcess(name string, cmd *exec.Cmd) {
+func (e *Executor) monitorProcess(name string, cmd *exec.Cmd) {
 	err := cmd.Wait()
-	e.untrackKeepAliveProcess(name)
-	e.logKeepAliveProcessExit(name, cmd, err)
+
+	e.mu.Lock()
+	delete(e.processes, name)
+	e.mu.Unlock()
+
+	if e.verbose {
+		if err != nil {
+			fmt.Printf("Process '%s' exited with error: %v\n", name, err)
+		} else {
+			fmt.Printf("Process '%s' exited cleanly\n", name)
+		}
+	}
 }
 
-func (e *sequentialExecutor) untrackKeepAliveProcess(name string) {
+func (e *Executor) GetStatus() ExecutionStatus {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	status := e.status
+	status.Results = make([]ExecutionResult, len(e.status.Results))
+	copy(status.Results, e.status.Results)
+	return status
+}
+
+func (e *Executor) Stop() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	delete(e.keepAliveProcs, name)
-}
 
-func (e *sequentialExecutor) logKeepAliveProcessExit(name string, cmd *exec.Cmd, err error) {
-	if !e.options.Verbose {
-		return
+	e.stopped = true
+
+	for name, cmd := range e.processes {
+		if cmd.Process != nil {
+			if e.verbose {
+				fmt.Printf("Terminating process '%s' (PID %d)\n", name, cmd.Process.Pid)
+			}
+			cmd.Process.Kill()
+		}
 	}
 
-	if err != nil {
-		e.logKeepAliveProcessFailure(name, cmd, err)
-	} else {
-		fmt.Fprintf(os.Stderr, "keepAlive process '%s' exited cleanly (PID %d)\n", name, cmd.Process.Pid)
-	}
+	e.processes = make(map[string]*exec.Cmd)
 }
 
-func (e *sequentialExecutor) logKeepAliveProcessFailure(name string, cmd *exec.Cmd, err error) {
-	exitCode := e.extractExitCode(err)
-	errorType := ErrorTypeSystemError
-	if _, ok := err.(*exec.ExitError); ok {
-		errorType = ErrorTypeNonZeroExit
-	}
-
-	fmt.Fprintf(os.Stderr, "keepAlive process '%s' exited unexpectedly:\n", name)
-	fmt.Fprintf(os.Stderr, "  Error: %v\n", err)
-	fmt.Fprintf(os.Stderr, "  Exit Code: %d\n", exitCode)
-	fmt.Fprintf(os.Stderr, "  Error Type: %s\n", errorType)
-	fmt.Fprintf(os.Stderr, "  PID: %d\n", cmd.Process.Pid)
+func (e *Executor) isStopped() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.stopped
 }
 
-// Helper methods for thread-safe status updates
-
-func (e *sequentialExecutor) updateCurrentCommand(cmd *config.Command) {
+func (e *Executor) updateCurrentCommand(cmd *config.Command) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.status.State = StateRunning
 	e.status.CurrentCommand = cmd
 }
 
-func (e *sequentialExecutor) updateState(state ExecutionState, errorMsg string) {
+func (e *Executor) updateState(state ExecutionState, errorMsg string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.status.State = state
@@ -238,240 +228,14 @@ func (e *sequentialExecutor) updateState(state ExecutionState, errorMsg string) 
 	e.status.LastError = errorMsg
 }
 
-func (e *sequentialExecutor) addResult(result ExecutionResult) {
+func (e *Executor) addResult(result ExecutionResult) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.status.Results = append(e.status.Results, result)
 }
 
-func (e *sequentialExecutor) updateCompletedCount(count int) {
+func (e *Executor) updateCompletedCount(count int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.status.CompletedCount = count
-}
-
-func (e *sequentialExecutor) isStopped() bool {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.stopped
-}
-
-func (e *sequentialExecutor) validateExecutionInput(cfg *config.Config) error {
-	if cfg == nil {
-		return fmt.Errorf("configuration cannot be nil")
-	}
-	if len(cfg.Commands) == 0 {
-		return fmt.Errorf("no commands to execute")
-	}
-	return nil
-}
-
-func (e *sequentialExecutor) initializeExecution(cfg *config.Config) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	e.status = ExecutionStatus{
-		State:      StateReady,
-		TotalCount: len(cfg.Commands),
-		Results:    make([]ExecutionResult, 0, len(cfg.Commands)),
-	}
-	e.stopped = false
-}
-
-func (e *sequentialExecutor) checkExecutionPreconditions(ctx context.Context) error {
-	if e.isStopped() {
-		return fmt.Errorf("execution stopped by user")
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-		return nil
-	}
-}
-
-func (e *sequentialExecutor) executeAndReportCommand(ctx context.Context, cmd config.Command, index int) error {
-	e.updateCurrentCommand(&cmd)
-	e.reporter.ReportCommandStart(cmd.Name, index)
-
-	result, err := e.executeCommand(ctx, cmd)
-	e.addResult(result)
-
-	if err != nil {
-		e.reporter.ReportCommandFailure(result, index)
-		return err
-	}
-
-	e.reporter.ReportCommandSuccess(result, index)
-	return nil
-}
-
-func (e *sequentialExecutor) handleExecutionFailure(err error, commandIndex, totalCommands int) {
-	status := e.GetStatus()
-	failureContext := e.buildFailureContext(commandIndex, totalCommands, status)
-	e.updateState(StateFailed, failureContext)
-
-	finalStatus := e.GetStatus()
-	e.reporter.ReportExecutionComplete(finalStatus)
-	e.reporter.ReportExecutionSummary(finalStatus)
-}
-
-func (e *sequentialExecutor) buildFailureContext(commandIndex, totalCommands int, status ExecutionStatus) string {
-	context := fmt.Sprintf("Execution stopped at command %d of %d", commandIndex, totalCommands)
-
-	if len(status.Results) == 0 {
-		return context
-	}
-
-	lastResult := status.Results[len(status.Results)-1]
-	if lastResult.ErrorDetail == nil {
-		return context
-	}
-
-	detail := lastResult.ErrorDetail
-	context += fmt.Sprintf("\nError Type: %s", detail.Type)
-
-	if detail.CommandLine != "" {
-		context += fmt.Sprintf("\nFull Command: %s", detail.CommandLine)
-	}
-	if detail.WorkingDir != "" {
-		context += fmt.Sprintf("\nWorking Directory: %s", detail.WorkingDir)
-	}
-	if detail.Stderr != "" {
-		context += fmt.Sprintf("\nStderr: %s", detail.Stderr)
-	}
-
-	return context
-}
-
-func (e *sequentialExecutor) completeExecution() {
-	e.updateState(StateSuccess, "")
-	status := e.GetStatus()
-	e.reporter.ReportExecutionComplete(status)
-	e.reporter.ReportExecutionSummary(status)
-}
-
-func (e *sequentialExecutor) handleUnsupportedMode(cmd config.Command, result ExecutionResult) (ExecutionResult, error) {
-	result.EndTime = time.Now()
-	result.Duration = result.EndTime.Sub(result.StartTime)
-	result.Success = false
-	result.Error = fmt.Sprintf("unsupported execution mode: %s", cmd.Mode)
-	result.ExitCode = -1
-
-	modeErr := fmt.Errorf("unsupported execution mode: %s", cmd.Mode)
-	result.ErrorDetail = createErrorDetail(cmd, nil, modeErr, "", "")
-	result.ErrorDetail.Type = ErrorTypeUnsupportedMode
-
-	enhancedErr := fmt.Errorf("command '%s' has unsupported execution mode '%s': supported modes are 'once' and 'keepAlive'\n  Command: %s",
-		cmd.Name, cmd.Mode, result.ErrorDetail.CommandLine)
-
-	return result, enhancedErr
-}
-
-func (e *sequentialExecutor) prepareCommand(ctx context.Context, cmd config.Command) *exec.Cmd {
-	execCmd := exec.CommandContext(ctx, cmd.Command, cmd.Args...)
-	e.setWorkingDirectory(execCmd, cmd)
-	e.setEnvironmentVariables(execCmd, cmd)
-	return execCmd
-}
-
-func (e *sequentialExecutor) setWorkingDirectory(execCmd *exec.Cmd, cmd config.Command) {
-	if cmd.WorkDir != "" {
-		execCmd.Dir = cmd.WorkDir
-	} else if e.options.WorkingDir != "" {
-		execCmd.Dir = e.options.WorkingDir
-	}
-}
-
-func (e *sequentialExecutor) setEnvironmentVariables(execCmd *exec.Cmd, cmd config.Command) {
-	if len(cmd.Env) > 0 {
-		execCmd.Env = os.Environ()
-		for key, value := range cmd.Env {
-			execCmd.Env = append(execCmd.Env, fmt.Sprintf("%s=%s", key, value))
-		}
-	}
-}
-
-func (e *sequentialExecutor) handleCommandFailure(cmd config.Command, execCmd *exec.Cmd, result ExecutionResult, err error, output string) (ExecutionResult, error) {
-	result.Success = false
-	result.Error = err.Error()
-	result.ExitCode = e.extractExitCode(err)
-	result.ErrorDetail = createErrorDetail(cmd, execCmd, err, output, output)
-
-	enhancedErr := fmt.Errorf("command '%s' failed: %w\n  Command: %s\n  Working Directory: %s\n  Exit Code: %d",
-		cmd.Name, err, result.ErrorDetail.CommandLine, result.ErrorDetail.WorkingDir, result.ExitCode)
-
-	return result, enhancedErr
-}
-
-func (e *sequentialExecutor) extractExitCode(err error) int {
-	if exitError, ok := err.(*exec.ExitError); ok {
-		return exitError.ExitCode()
-	}
-	return -1
-}
-
-func (e *sequentialExecutor) handleKeepAliveStartupFailure(cmd config.Command, execCmd *exec.Cmd, result ExecutionResult, err error) (ExecutionResult, error) {
-	result.Success = false
-	result.Error = err.Error()
-	result.ExitCode = -1
-	result.ErrorDetail = createErrorDetail(cmd, execCmd, err, "", "")
-	result.ErrorDetail.Type = ErrorTypeStartupFailure
-
-	enhancedErr := fmt.Errorf("failed to start keepAlive command '%s': %w\n  Command: %s\n  Working Directory: %s",
-		cmd.Name, err, result.ErrorDetail.CommandLine, result.ErrorDetail.WorkingDir)
-
-	return result, enhancedErr
-}
-
-func (e *sequentialExecutor) trackKeepAliveProcess(name string, execCmd *exec.Cmd) {
-	e.mu.Lock()
-	e.keepAliveProcs[name] = execCmd
-	e.mu.Unlock()
-	go e.monitorKeepAliveProcess(name, execCmd)
-}
-
-// ReportProcessStatus reports the current status of all active processes
-func (e *sequentialExecutor) ReportProcessStatus() {
-	if e.processManager != nil {
-		e.processManager.ReportCurrentStatus()
-	}
-}
-
-// ReportHealthStatus reports the health status of all monitored processes
-func (e *sequentialExecutor) ReportHealthStatus() {
-	if e.processManager != nil {
-		e.processManager.ReportHealthStatus()
-	}
-}
-
-// GetActiveProcesses returns information about currently running processes
-func (e *sequentialExecutor) GetActiveProcesses() map[string]ProcessInfo {
-	if e.processManager != nil {
-		return e.processManager.GetActiveProcesses()
-	}
-	return make(map[string]ProcessInfo)
-}
-
-// GetProcessHealth returns health status for all monitored processes
-func (e *sequentialExecutor) GetProcessHealth() map[string]ProcessHealth {
-	if e.processManager != nil {
-		return e.processManager.GetProcessHealth()
-	}
-	return make(map[string]ProcessHealth)
-}
-
-// StartHealthMonitoring starts background health monitoring
-func (e *sequentialExecutor) StartHealthMonitoring(ctx context.Context) error {
-	if e.processManager != nil {
-		return e.processManager.StartHealthMonitoring(ctx)
-	}
-	return fmt.Errorf("process manager not available")
-}
-
-// StopHealthMonitoring stops background health monitoring
-func (e *sequentialExecutor) StopHealthMonitoring() error {
-	if e.processManager != nil {
-		return e.processManager.StopHealthMonitoring()
-	}
-	return fmt.Errorf("process manager not available")
 }

@@ -13,6 +13,12 @@ type Interface interface {
 	// ShowHelp displays the help message
 	ShowHelp()
 
+	// ShouldShowVersion returns true if version should be displayed
+	ShouldShowVersion() bool
+
+	// ShowVersion displays version information
+	ShowVersion(version string)
+
 	// Run executes the CLI application with the parsed options
 	Run(ctx context.Context) error
 

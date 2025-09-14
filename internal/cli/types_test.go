@@ -351,3 +351,200 @@ func contains(s, substr string) bool {
 				return false
 			}())))
 }
+func TestCLI_ShowHelp(t *testing.T) {
+	// Capture stdout to verify help output
+	cli := NewCLI([]string{"-h"})
+	cli.Parse()
+
+	// This test verifies that ShowHelp doesn't panic and contains expected content
+	// We can't easily capture stdout in a unit test without complex setup,
+	// but we can at least verify the method runs without error
+	cli.ShowHelp()
+}
+
+func TestCLI_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name           string
+		args           []string
+		expectParseErr bool
+		expectRunErr   bool
+	}{
+		{
+			name:           "missing config file argument",
+			args:           []string{"-f"},
+			expectParseErr: true,
+			expectRunErr:   false,
+		},
+		{
+			name:           "invalid flag format",
+			args:           []string{"--invalid-flag"},
+			expectParseErr: true,
+			expectRunErr:   false,
+		},
+		{
+			name:           "nonexistent config file",
+			args:           []string{"-f", "does-not-exist.json"},
+			expectParseErr: false,
+			expectRunErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := NewCLI(tt.args)
+			parseErr := cli.Parse()
+
+			if tt.expectParseErr && parseErr == nil {
+				t.Errorf("Expected parse error but got none")
+			}
+			if !tt.expectParseErr && parseErr != nil {
+				t.Errorf("Unexpected parse error: %v", parseErr)
+			}
+
+			// Only test Run if Parse succeeded
+			if parseErr == nil && !cli.ShouldShowHelp() {
+				ctx := context.Background()
+				runErr := cli.Run(ctx)
+
+				if tt.expectRunErr && runErr == nil {
+					t.Errorf("Expected run error but got none")
+				}
+				if !tt.expectRunErr && runErr != nil {
+					t.Errorf("Unexpected run error: %v", runErr)
+				}
+			}
+		})
+	}
+}
+
+func TestCLI_ContextCancellation(t *testing.T) {
+	// Create a temporary config file with a long-running command
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "test.queue.json")
+
+	configContent := `{
+		"version": "1.0",
+		"commands": [
+			{
+				"name": "long-running-command",
+				"command": "sleep",
+				"args": ["10"],
+				"mode": "once"
+			}
+		]
+	}`
+
+	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to create test config file: %v", err)
+	}
+
+	cli := NewCLI([]string{"-f", configFile})
+	if err := cli.Parse(); err != nil {
+		t.Fatalf("Failed to parse CLI args: %v", err)
+	}
+
+	// Create a context that will be cancelled quickly
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	err := cli.Run(ctx)
+	if err == nil {
+		t.Error("Expected error due to context cancellation, but got none")
+	}
+
+	// The error should be related to context cancellation or signal termination
+	errStr := err.Error()
+	if !contains(errStr, "context") && !contains(errStr, "timeout") && !contains(errStr, "cancelled") &&
+		!contains(errStr, "killed") && !contains(errStr, "signal") {
+		t.Errorf("Expected context/signal-related error, got: %v", err)
+	}
+}
+
+func TestCLI_VerboseOutput(t *testing.T) {
+	// Create a temporary config file
+	tempDir := t.TempDir()
+	configFile := filepath.Join(tempDir, "test.queue.json")
+
+	configContent := `{
+		"version": "1.0",
+		"commands": [
+			{
+				"name": "test-echo",
+				"command": "echo",
+				"args": ["test output"],
+				"mode": "once"
+			}
+		]
+	}`
+
+	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to create test config file: %v", err)
+	}
+
+	// Test verbose mode
+	cli := NewCLI([]string{"-f", configFile, "-v"})
+	if err := cli.Parse(); err != nil {
+		t.Fatalf("Failed to parse CLI args: %v", err)
+	}
+
+	opts := cli.GetOptions()
+	if !opts.Verbose {
+		t.Error("Expected verbose mode to be enabled")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := cli.Run(ctx); err != nil {
+		t.Errorf("CLI Run failed in verbose mode: %v", err)
+	}
+}
+
+func TestCLI_EmptyArgs(t *testing.T) {
+	cli := NewCLI([]string{})
+	if err := cli.Parse(); err != nil {
+		t.Errorf("Unexpected error with empty args: %v", err)
+	}
+
+	opts := cli.GetOptions()
+	if opts.ConfigFile != ".queue.json" {
+		t.Errorf("Expected default config file, got %s", opts.ConfigFile)
+	}
+	if opts.Verbose {
+		t.Error("Expected verbose to be false by default")
+	}
+	if opts.Help {
+		t.Error("Expected help to be false by default")
+	}
+}
+
+func TestCLI_MultipleHelpFlags(t *testing.T) {
+	// Test that multiple help flags work correctly
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"short help", []string{"-h"}},
+		{"long help", []string{"-help"}},
+		{"both help flags", []string{"-h", "-help"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := NewCLI(tt.args)
+			if err := cli.Parse(); err != nil {
+				t.Errorf("Unexpected error: %v", err)
+			}
+
+			if !cli.ShouldShowHelp() {
+				t.Error("Expected help to be requested")
+			}
+
+			// Running with help should not error
+			ctx := context.Background()
+			if err := cli.Run(ctx); err != nil {
+				t.Errorf("Unexpected error when running with help: %v", err)
+			}
+		})
+	}
+}

@@ -204,11 +204,11 @@ CLI Args → [Parser] → [Validator] → [Orchestrator] → Output
 ### Tasks
 - [x] **4.1** Design CLI interface with minimal required arguments
 - [x] **4.2** Implement argument parsing with validation and defaults
-- [ ] **4.3** Create output formatting system (quiet/verbose modes)
-- [ ] **4.4** Build help system with clear usage examples
-- [ ] **4.5** Add execution summary and progress indicators
-- [ ] **4.6** Test CLI with various argument combinations and error scenarios
-- [ ] **4.7** Ensure that all rules and requirements defined in spec.md, as well as the specifics outlined for feature 4, are followed for tasks 4.1 to 4.6. Fix any discrepancies
+- [x] **4.3** Create output formatting system (quiet/verbose modes)
+- [x] **4.4** Build help system with clear usage examples
+- [x] **4.5** Add execution summary and progress indicators
+- [x] **4.6** Test CLI with various argument combinations and error scenarios
+- [x] **4.7** Ensure that all rules and requirements defined in spec.md, as well as the specifics outlined for feature 4, are followed for tasks 4.1 to 4.6. Fix any discrepancies
 
 ---
 
@@ -246,13 +246,13 @@ Signal → [Handler] → Graceful Shutdown → Timeout → Force Kill
 **Process Tree Management:** Track parent-child relationships to ensure complete cleanup
 
 ### Tasks
-- [ ] **5.1** Design signal handling system with proper goroutine management
-- [ ] **5.2** Implement graceful shutdown coordinator with timeout handling
-- [ ] **5.3** Build signal forwarding mechanism for child processes
-- [ ] **5.4** Create escalating termination strategy (graceful → force)
-- [ ] **5.5** Add process tree tracking for complete cleanup
-- [ ] **5.6** Test signal handling with complex process hierarchies and edge cases
-- [ ] **5.7** Ensure that all rules and requirements defined in spec.md, as well as the specifics outlined for feature 5, are followed for tasks 5.1 to 5.6. Fix any discrepancies
+- [x] **5.1** Design signal handling system with proper goroutine management
+- [x] **5.2** Implement graceful shutdown coordinator with timeout handling
+- [x] **5.3** Build signal forwarding mechanism for child processes
+- [x] **5.4** Create escalating termination strategy (graceful → force)
+- [x] **5.5** Add process tree tracking for complete cleanup
+- [x] **5.6** Test signal handling with complex process hierarchies and edge cases
+- [x] **5.7** Ensure that all rules and requirements defined in spec.md, as well as the specifics outlined for feature 5, are followed for tasks 5.1 to 5.6. Fix any discrepancies
 
 ---
 
@@ -295,7 +295,7 @@ Source Code → [CI/CD] → Cross-Platform Builds → GitHub Releases
 ### Tasks
 
 - [ ] **6.0** Clean-up the directory and remove unneeded or redundant files/folders 
-- [ ] **6.1** Set up GitHub repository with proper structure and README
+- [ ] **6.1** Set up the repository with proper structure and README
 - [ ] **6.2** Create cross-platform build configuration
 - [ ] **6.3** Implement GitHub Actions for automated testing and releases
 - [ ] **6.4** Build release pipeline with cross-platform binary generation

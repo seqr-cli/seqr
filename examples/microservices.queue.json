@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "commands": [
+    {
+      "name": "start-redis",
+      "command": "docker",
+      "args": [
+        "run",
+        "-d",
+        "--name",
+        "redis",
+        "-p",
+        "6379:6379",
+        "redis:alpine"
+      ],
+      "mode": "keepAlive"
+    },
+    {
+      "name": "start-user-service",
+      "command": "./user-service",
+      "args": [
+        "--port",
+        "8001"
+      ],
+      "mode": "keepAlive",
+      "workDir": "./services/user"
+    },
+    {
+      "name": "start-order-service",
+      "command": "./order-service",
+      "args": [
+        "--port",
+        "8002"
+      ],
+      "mode": "keepAlive",
+      "workDir": "./services/order"
+    },
+    {
+      "name": "start-gateway",
+      "command": "./gateway",
+      "args": [
+        "--port",
+        "8000"
+      ],
+      "mode": "keepAlive",
+      "workDir": "./gateway"
+    }
+  ]
+}
