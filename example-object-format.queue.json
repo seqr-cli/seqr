@@ -1,6 +1,47 @@
 {
+  "_comment": "Object Format Example - Commands as structured objects (most explicit and structured)",
+  "_object_format_guide": {
+    "command_structure": {
+      "args": "Array of arguments passed to the command",
+      "command": "The executable name (e.g., 'docker', 'npm', 'node')"
+    },
+    "equivalent_examples": {
+      "array_format": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "object_format": {
+        "args": [
+          "run",
+          "build"
+        ],
+        "command": "npm"
+      },
+      "string_format": "\"npm run build\""
+    }
+  },
+  "_usage": {
+    "cons": [
+      "Most verbose format",
+      "Requires more typing than string or array formats"
+    ],
+    "description": "Object format separates command executable from arguments in a structured way",
+    "pros": [
+      "Most structured and explicit format",
+      "Clear separation between executable and arguments",
+      "Easy to programmatically generate and modify",
+      "No ambiguity about command parsing"
+    ],
+    "structure": {
+      "command": "Object with 'command' (executable) and 'args' (array of arguments)",
+      "example": "{\"command\": \"docker\", \"args\": [\"run\", \"-p\", \"3000:3000\", \"myapp\"]}"
+    }
+  },
   "commands": [
     {
+      "_comment": "Set up PostgreSQL database container for development",
+      "_explanation": "Starts PostgreSQL in Docker container with environment variables for setup",
       "command": {
         "args": [
           "run",
@@ -21,6 +62,8 @@
       "name": "database-setup"
     },
     {
+      "_comment": "Wait for database to be ready before running migrations",
+      "_tip": "Always wait for services to be ready before depending on them",
       "command": {
         "args": [
           "3"
@@ -31,6 +74,8 @@
       "name": "wait-for-db"
     },
     {
+      "_comment": "Run database migrations to set up schema",
+      "_workdir_explanation": "Runs in ./api directory where package.json with db:migrate script is located",
       "command": {
         "args": [
           "run",
@@ -43,6 +88,8 @@
       "workDir": "./api"
     },
     {
+      "_comment": "Start the API server in development mode",
+      "_env_explanation": "DATABASE_URL connects to the PostgreSQL container started above",
       "command": {
         "args": [
           "run",

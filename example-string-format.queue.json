@@ -1,16 +1,42 @@
 {
+  "_comment": "String Format Example - Commands as simple strings (easiest to read and write)",
+  "_modes_explained": {
+    "keepAlive": "Command starts and runs in background while seqr continues to next command",
+    "once": "Command runs once and seqr waits for it to complete before continuing"
+  },
+  "_usage": {
+    "cons": [
+      "Shell parsing can be tricky with quotes and spaces",
+      "Less structured than object format"
+    ],
+    "description": "String format allows you to write commands exactly as you would in terminal",
+    "examples": [
+      "\"npm install\" - Simple command",
+      "\"npm run build --production\" - Command with flags",
+      "\"echo 'Hello World'\" - Command with quotes"
+    ],
+    "pros": [
+      "Most familiar - looks like terminal commands",
+      "Easiest to read and write",
+      "Good for simple commands without complex arguments"
+    ]
+  },
   "commands": [
     {
+      "_comment": "Install dependencies - runs once and waits for completion",
       "command": "npm install",
       "mode": "once",
       "name": "install-deps"
     },
     {
+      "_comment": "Build the project - runs once after dependencies are installed",
       "command": "npm run build",
       "mode": "once",
       "name": "build-project"
     },
     {
+      "_comment": "Start the server - runs in background (keepAlive mode)",
+      "_env_comment": "Environment variables are passed to the command process",
       "command": "npm start",
       "env": {
         "NODE_ENV": "production",

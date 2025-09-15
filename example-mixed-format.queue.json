@@ -1,11 +1,39 @@
 {
+  "_comment": "Mixed Format Example - Demonstrates all three command formats in one file",
+  "_execution_flow": [
+    "1. simple-echo runs once and completes",
+    "2. list-files runs once and completes",
+    "3. complex-docker runs once and completes",
+    "4. background-service starts and runs in background",
+    "5. seqr keeps running to maintain background-service"
+  ],
+  "_format_guide": {
+    "description": "You can mix different command formats in the same queue file",
+    "recommendation": "Choose the format that makes each command most readable",
+    "when_to_use_each": {
+      "array_format": "Commands with multiple arguments or spaces in arguments",
+      "object_format": "When you want maximum clarity and structure",
+      "string_format": "Simple commands without complex arguments or spaces"
+    }
+  },
+  "_tips": [
+    "Use 'seqr -v' to see detailed execution logs",
+    "Background services (keepAlive) will restart if they crash",
+    "Press Ctrl+C to stop all processes and exit seqr"
+  ],
   "commands": [
     {
+      "_comment": "String format - simple command, easy to read",
+      "_format": "string",
+      "_why_string": "Simple command with no complex arguments - string format is clearest",
       "command": "echo Hello from string format!",
       "mode": "once",
       "name": "simple-echo"
     },
     {
+      "_comment": "Array format - command with flags, no shell parsing issues",
+      "_format": "array",
+      "_why_array": "Flags are explicit as separate array elements",
       "command": [
         "ls",
         "-la"
@@ -14,6 +42,9 @@
       "name": "list-files"
     },
     {
+      "_comment": "Object format - complex command with many arguments",
+      "_format": "object",
+      "_why_object": "Complex Docker command with volume mounts - object format makes structure clear",
       "command": {
         "args": [
           "run",
@@ -30,6 +61,9 @@
       "name": "complex-docker"
     },
     {
+      "_comment": "Array format - background service with module flag",
+      "_format": "array",
+      "_why_array": "Python module syntax (-m flag) is clearer as separate arguments",
       "command": [
         "python",
         "-m",
