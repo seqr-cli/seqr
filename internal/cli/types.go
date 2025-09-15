@@ -194,16 +194,13 @@ func (c *CLI) Run(ctx context.Context) error {
 	if c.executor.HasActiveKeepAliveProcesses() {
 		if c.options.Verbose {
 			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [seqr] [system] KeepAlive processes running, waiting for termination signal...\n", timestamp)
+			fmt.Printf("[%s] [seqr] [system] KeepAlive processes running in background, main execution complete\n", timestamp)
+			fmt.Printf("[%s] [seqr] [system] Use 'seqr --kill' to terminate background processes\n", timestamp)
 		}
 
-		// Wait for context cancellation when there are keepAlive processes
-		<-ctx.Done()
-
-		if c.options.Verbose {
-			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [seqr] [system] Received termination signal, shutting down...\n", timestamp)
-		}
+		// For background execution, we don't wait for keepAlive processes
+		// They continue running in the background while the main execution completes
+		// Users can use 'seqr --kill' to terminate them when needed
 	}
 
 	return nil

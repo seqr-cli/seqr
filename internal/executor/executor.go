@@ -80,6 +80,9 @@ func (e *Executor) Execute(ctx context.Context, cfg *config.Config) error {
 
 		e.reporter.ReportCommandSuccess(result, i)
 		e.updateCompletedCount(i + 1)
+
+		// For keepAlive commands, don't wait for completion - they run in background
+		// The execution continues immediately to the next command
 	}
 
 	e.updateState(StateSuccess, "")
