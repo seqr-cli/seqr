@@ -7,7 +7,7 @@ import (
 
 // DemonstrateEnhancedErrorHandling shows examples of the improved error messages
 func DemonstrateEnhancedErrorHandling() {
-	fmt.Println("=== Enhanced Error Handling Demonstration ===\n")
+	fmt.Println("=== Enhanced Error Handling Demonstration ===")
 
 	examples := []struct {
 		name string
@@ -72,7 +72,7 @@ func DemonstrateEnhancedErrorHandling() {
 		if err != nil {
 			fmt.Printf("Error: %s\n\n", err.Error())
 		} else {
-			fmt.Println("No error (unexpected)\n")
+			fmt.Println("No error (unexpected)")
 		}
 	}
 }

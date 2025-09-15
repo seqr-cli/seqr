@@ -71,8 +71,7 @@
 - [x] **1.2** Implement format detection and validation
 - [x] **1.3** Create normalization to unified internal structure
 - [x] **1.4** Add error handling for invalid formats
-- [ ] **1.5** Create unit tests for all supported formats
-
+- [x] **1.5** Create unit tests for all supported formats
 ---
 
 ## ⚡ Feature 2: Enhanced Verbose Logging
