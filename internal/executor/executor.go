@@ -181,17 +181,31 @@ func (e *Executor) executeOnceWithRealTimeOutput(execCmd *exec.Cmd, result Execu
 	var outputBuilder strings.Builder
 	var wg sync.WaitGroup
 
-	// Stream stdout
+	// Stream stdout with proper error handling
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
+					time.Now().Format("15:04:05.000"), result.Command.Name, r)
+				os.Stdout.Sync()
+			}
+		}()
 		e.streamOutput(stdoutPipe, &outputBuilder, result.Command.Name, "stdout")
 	}()
 
-	// Stream stderr
+	// Stream stderr with proper error handling
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
+					time.Now().Format("15:04:05.000"), result.Command.Name, r)
+				os.Stdout.Sync()
+			}
+		}()
 		e.streamOutput(stderrPipe, &outputBuilder, result.Command.Name, "stderr")
 	}()
 
@@ -222,6 +236,14 @@ func (e *Executor) executeOnceWithRealTimeOutput(execCmd *exec.Cmd, result Execu
 }
 
 func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Builder, commandName, streamType string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
+				time.Now().Format("15:04:05.000"), commandName, r)
+			os.Stdout.Sync()
+		}
+	}()
+
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -235,14 +257,18 @@ func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Build
 			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
 		}
 
+		// Ensure immediate output by flushing stdout
+		os.Stdout.Sync()
+
 		// Also capture for the result output
 		outputBuilder.WriteString(line)
 		outputBuilder.WriteString("\n")
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !strings.Contains(err.Error(), "file already closed") {
 		fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
 			time.Now().Format("15:04:05.000"), commandName, streamType, err)
+		os.Stdout.Sync()
 	}
 }
 
@@ -312,12 +338,26 @@ func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result 
 	e.processes[name] = execCmd
 	e.mu.Unlock()
 
-	// Start streaming output in background goroutines
-	go e.streamOutputContinuous(stdoutPipe, name, "stdout")
-	go e.streamOutputContinuous(stderrPipe, name, "stderr")
+	// Start streaming output in background goroutines with proper lifecycle management
+	var streamWg sync.WaitGroup
 
-	// Monitor the process
-	go e.monitorProcess(name, execCmd)
+	streamWg.Add(2)
+	go func() {
+		defer streamWg.Done()
+		e.streamOutputContinuous(stdoutPipe, name, "stdout")
+	}()
+
+	go func() {
+		defer streamWg.Done()
+		e.streamOutputContinuous(stderrPipe, name, "stderr")
+	}()
+
+	// Monitor the process and streaming lifecycle
+	go func() {
+		e.monitorProcess(name, execCmd)
+		// Wait for streaming to complete after process ends
+		streamWg.Wait()
+	}()
 
 	result.EndTime = time.Now()
 	result.Duration = result.EndTime.Sub(result.StartTime)
@@ -328,8 +368,28 @@ func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result 
 }
 
 func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, streamType string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
+				time.Now().Format("15:04:05.000"), commandName, r)
+			os.Stdout.Sync()
+		}
+		// Ensure pipe is closed
+		pipe.Close()
+	}()
+
 	scanner := bufio.NewScanner(pipe)
+
+	// Set a smaller buffer size to reduce latency for real-time streaming
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
 	for scanner.Scan() {
+		// Check if executor has been stopped
+		if e.isStopped() {
+			break
+		}
+
 		line := scanner.Text()
 		timestamp := time.Now().Format("15:04:05.000")
 
@@ -340,11 +400,15 @@ func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, strea
 		} else {
 			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
 		}
+
+		// Ensure immediate output by flushing stdout for real-time streaming
+		os.Stdout.Sync()
 	}
 
-	if err := scanner.Err(); err != nil {
+	if err := scanner.Err(); err != nil && !e.isStopped() && !strings.Contains(err.Error(), "file already closed") {
 		fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
 			time.Now().Format("15:04:05.000"), commandName, streamType, err)
+		os.Stdout.Sync()
 	}
 }
 
@@ -362,6 +426,8 @@ func (e *Executor) monitorProcess(name string, cmd *exec.Cmd) {
 		} else {
 			fmt.Printf("[%s] [%s] [process] Process exited cleanly\n", timestamp, name)
 		}
+		// Ensure immediate output for process status updates
+		os.Stdout.Sync()
 	}
 }
 
