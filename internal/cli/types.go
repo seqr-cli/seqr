@@ -54,6 +54,8 @@ func (c *CLI) setupFlags() {
 		"Path to queue configuration file")
 	c.flagSet.BoolVar(&c.options.Verbose, "v", c.options.Verbose,
 		"Enable verbose output with execution details")
+	c.flagSet.BoolVar(&c.options.Verbose, "verbose", c.options.Verbose,
+		"Enable verbose output with execution details")
 	c.flagSet.BoolVar(&c.options.Help, "h", c.options.Help,
 		"Show help message")
 	c.flagSet.BoolVar(&c.options.Help, "help", c.options.Help,
@@ -116,10 +118,11 @@ func (c *CLI) ShowHelp() {
 	fmt.Fprintf(os.Stdout, "OPTIONS:\n")
 	c.flagSet.PrintDefaults()
 	fmt.Fprintf(os.Stdout, "\nEXAMPLES:\n")
-	fmt.Fprintf(os.Stdout, "  seqr                    # Run commands from .queue.json\n")
-	fmt.Fprintf(os.Stdout, "  seqr -f my-queue.json   # Run commands from custom file\n")
-	fmt.Fprintf(os.Stdout, "  seqr -v                 # Run with verbose output\n")
-	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v   # Custom file with verbose output\n\n")
+	fmt.Fprintf(os.Stdout, "  seqr                      # Run commands from .queue.json\n")
+	fmt.Fprintf(os.Stdout, "  seqr -f my-queue.json     # Run commands from custom file\n")
+	fmt.Fprintf(os.Stdout, "  seqr -v                   # Run with verbose output\n")
+	fmt.Fprintf(os.Stdout, "  seqr --verbose            # Run with verbose output (long form)\n")
+	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v     # Custom file with verbose output\n\n")
 	fmt.Fprintf(os.Stdout, "CONFIGURATION:\n")
 	fmt.Fprintf(os.Stdout, "  The queue file should be a JSON file with the following structure:\n")
 	fmt.Fprintf(os.Stdout, "  {\n")

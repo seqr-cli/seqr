@@ -56,6 +56,16 @@ func TestCLI_Parse(t *testing.T) {
 			},
 		},
 		{
+			name:        "verbose flag long form",
+			args:        []string{"-verbose"},
+			expectError: false,
+			expectedOpts: CLIOptions{
+				ConfigFile: ".queue.json",
+				Verbose:    true,
+				Help:       false,
+			},
+		},
+		{
 			name:        "custom config file",
 			args:        []string{"-f", "custom.json"},
 			expectError: false, // File validation happens in Run(), not Parse()
@@ -312,6 +322,15 @@ func TestCLI_FlagCombinations(t *testing.T) {
 				ConfigFile: ".queue.json",
 				Verbose:    true,
 				Help:       true,
+			},
+		},
+		{
+			name: "long verbose flag with config file",
+			args: []string{"-f", "test.json", "-verbose"},
+			expectedOpts: CLIOptions{
+				ConfigFile: "test.json",
+				Verbose:    true,
+				Help:       false,
 			},
 		},
 	}
