@@ -228,7 +228,12 @@ func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Build
 		timestamp := time.Now().Format("15:04:05.000")
 
 		// Write to console with timestamp and command identification
-		fmt.Printf("[%s] [%s] [%s] %s\n", timestamp, commandName, streamType, line)
+		// Use different visual indicators for stdout vs stderr
+		if streamType == "stderr" {
+			fmt.Printf("[%s] [%s] ❌ %s\n", timestamp, commandName, line)
+		} else {
+			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
+		}
 
 		// Also capture for the result output
 		outputBuilder.WriteString(line)
@@ -236,7 +241,7 @@ func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Build
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Printf("[%s] [%s] [%s] Error reading output: %v\n",
+		fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
 			time.Now().Format("15:04:05.000"), commandName, streamType, err)
 	}
 }
@@ -329,11 +334,16 @@ func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, strea
 		timestamp := time.Now().Format("15:04:05.000")
 
 		// Write to console with timestamp and command identification
-		fmt.Printf("[%s] [%s] [%s] %s\n", timestamp, commandName, streamType, line)
+		// Use different visual indicators for stdout vs stderr
+		if streamType == "stderr" {
+			fmt.Printf("[%s] [%s] ❌ %s\n", timestamp, commandName, line)
+		} else {
+			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Printf("[%s] [%s] [%s] Error reading output: %v\n",
+		fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
 			time.Now().Format("15:04:05.000"), commandName, streamType, err)
 	}
 }
