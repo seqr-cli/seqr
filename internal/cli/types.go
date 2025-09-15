@@ -217,8 +217,33 @@ func (c *CLI) RunInit() error {
 
 // RunKill terminates running seqr processes
 func (c *CLI) RunKill() error {
-	// TODO: Implement process termination logic in subsequent tasks
-	fmt.Fprintf(os.Stdout, "Kill functionality will be implemented in subsequent tasks\n")
+	processManager := executor.NewProcessManager()
+
+	// Get all running processes
+	processes, err := processManager.GetAllRunningProcesses()
+	if err != nil {
+		return fmt.Errorf("failed to get running processes: %w", err)
+	}
+
+	if len(processes) == 0 {
+		fmt.Fprintf(os.Stdout, "No seqr processes are currently running\n")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stdout, "Found %d running seqr process(es):\n", len(processes))
+	for pid, info := range processes {
+		fmt.Fprintf(os.Stdout, "  PID %d: %s (%s %v) - started %s\n",
+			pid, info.Name, info.Command, info.Args, info.StartTime.Format("15:04:05"))
+	}
+
+	fmt.Fprintf(os.Stdout, "\nTerminating processes gracefully (SIGTERM first, then SIGKILL after timeout)...\n")
+
+	// Kill all processes with graceful termination (SIGTERM first, then SIGKILL after timeout)
+	if err := processManager.KillAllProcesses(true); err != nil {
+		return fmt.Errorf("failed to kill processes: %w", err)
+	}
+
+	fmt.Fprintf(os.Stdout, "All seqr processes have been terminated\n")
 	return nil
 }
 

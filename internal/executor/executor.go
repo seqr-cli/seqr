@@ -566,7 +566,7 @@ func (e *Executor) terminateProcessGracefully(process *os.Process, name string) 
 			timestamp := time.Now().Format("15:04:05.000")
 			fmt.Printf("[%s] [%s] [process] Windows detected, using force termination (PID %d)\n", timestamp, name, process.Pid)
 		}
-		process.Kill()
+		e.forceKillProcess(process, name)
 		return
 	}
 
@@ -576,7 +576,7 @@ func (e *Executor) terminateProcessGracefully(process *os.Process, name string) 
 			timestamp := time.Now().Format("15:04:05.000")
 			fmt.Printf("[%s] [%s] [process] Failed to send SIGTERM (PID %d): %v, using force kill\n", timestamp, name, process.Pid, err)
 		}
-		process.Kill()
+		e.forceKillProcess(process, name)
 		return
 	}
 
@@ -604,23 +604,88 @@ func (e *Executor) terminateProcessGracefully(process *os.Process, name string) 
 			}
 		}
 	case <-time.After(5 * time.Second):
-		// Timeout, force kill
+		// Timeout, force kill with SIGKILL
 		if e.verbose {
 			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [%s] [process] Graceful shutdown timeout (PID %d), using force kill\n", timestamp, name, process.Pid)
+			fmt.Printf("[%s] [%s] [process] Graceful shutdown timeout (PID %d), using force kill with SIGKILL\n", timestamp, name, process.Pid)
 		}
-		process.Kill()
+		e.forceKillProcessWithTimeout(process, name, done)
+	}
+}
 
-		// Wait a bit more for the force kill to complete
-		select {
-		case <-done:
-			// Process finally exited
-		case <-time.After(2 * time.Second):
-			// Even force kill timed out, log warning
-			if e.verbose {
-				timestamp := time.Now().Format("15:04:05.000")
-				fmt.Printf("[%s] [%s] [process] Warning: Force kill timeout (PID %d)\n", timestamp, name, process.Pid)
+// forceKillProcess immediately terminates a process with SIGKILL
+func (e *Executor) forceKillProcess(process *os.Process, name string) {
+	if err := process.Kill(); err != nil {
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Failed to send SIGKILL (PID %d): %v\n", timestamp, name, process.Pid, err)
+		}
+		return
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [%s] [process] Sent SIGKILL (PID %d)\n", timestamp, name, process.Pid)
+	}
+
+	// Wait for process to exit after SIGKILL
+	done := make(chan error, 1)
+	go func() {
+		_, err := process.Wait()
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			if err != nil {
+				fmt.Printf("[%s] [%s] [process] Process terminated with SIGKILL (PID %d): %v\n", timestamp, name, process.Pid, err)
+			} else {
+				fmt.Printf("[%s] [%s] [process] Process terminated with SIGKILL (PID %d)\n", timestamp, name, process.Pid)
 			}
+		}
+	case <-time.After(3 * time.Second):
+		// Even SIGKILL timed out, log warning
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Warning: SIGKILL timeout (PID %d) - process may be in uninterruptible state\n", timestamp, name, process.Pid)
+		}
+	}
+}
+
+// forceKillProcessWithTimeout sends SIGKILL and waits for process termination with timeout
+func (e *Executor) forceKillProcessWithTimeout(process *os.Process, name string, gracefulDone chan error) {
+	if err := process.Kill(); err != nil {
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Failed to send SIGKILL (PID %d): %v\n", timestamp, name, process.Pid, err)
+		}
+		return
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [%s] [process] Sent SIGKILL (PID %d), waiting for termination...\n", timestamp, name, process.Pid)
+	}
+
+	// Wait for either the graceful wait to complete or SIGKILL to take effect
+	select {
+	case err := <-gracefulDone:
+		// Process finally exited (either from SIGTERM or SIGKILL)
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			if err != nil {
+				fmt.Printf("[%s] [%s] [process] Process terminated after SIGKILL (PID %d): %v\n", timestamp, name, process.Pid, err)
+			} else {
+				fmt.Printf("[%s] [%s] [process] Process terminated after SIGKILL (PID %d)\n", timestamp, name, process.Pid)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		// Even SIGKILL timed out, log warning
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Warning: SIGKILL timeout (PID %d) - process may be in uninterruptible state\n", timestamp, name, process.Pid)
 		}
 	}
 }
