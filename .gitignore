@@ -38,3 +38,6 @@ Thumbs.db
 /seqr
 /bin/
 /dist/
+
+# Environment variables
+.env
