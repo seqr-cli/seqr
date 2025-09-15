@@ -227,7 +227,7 @@ func (e *Executor) executeOnceWithRealTimeOutput(execCmd *exec.Cmd, result Execu
 				os.Stdout.Sync()
 			}
 		}()
-		e.streamOutput(stdoutPipe, &outputBuilder, result.Command.Name, "stdout")
+		e.streamOutput(stdoutPipe, &outputBuilder, result.Command.Name, "stdout", result.Command.Command)
 	}()
 
 	// Stream stderr with proper error handling
@@ -241,7 +241,7 @@ func (e *Executor) executeOnceWithRealTimeOutput(execCmd *exec.Cmd, result Execu
 				os.Stdout.Sync()
 			}
 		}()
-		e.streamOutput(stderrPipe, &outputBuilder, result.Command.Name, "stderr")
+		e.streamOutput(stderrPipe, &outputBuilder, result.Command.Name, "stderr", result.Command.Command)
 	}()
 
 	// Wait for command to complete
@@ -270,7 +270,32 @@ func (e *Executor) executeOnceWithRealTimeOutput(execCmd *exec.Cmd, result Execu
 	return result, nil
 }
 
-func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Builder, commandName, streamType string) {
+func (e *Executor) detectCommandType(command string) string {
+	if strings.Contains(command, "docker") {
+		return "docker"
+	}
+	if strings.Contains(command, "vite") {
+		return "vite"
+	}
+	if strings.Contains(command, "node") {
+		return "node"
+	}
+	if strings.Contains(command, "bun") {
+		return "bun"
+	}
+	if strings.Contains(command, "npm") {
+		return "npm"
+	}
+	if strings.Contains(command, "yarn") {
+		return "yarn"
+	}
+	if strings.Contains(command, "pnpm") {
+		return "pnpm"
+	}
+	return "exec"
+}
+
+func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Builder, commandName, streamType, command string) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
@@ -279,17 +304,18 @@ func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Build
 		}
 	}()
 
+	cmdType := e.detectCommandType(command)
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
 		line := scanner.Text()
 		timestamp := time.Now().Format("15:04:05.000")
 
-		// Write to console with timestamp and command identification
+		// Write to console with timestamp, type, command identification
 		// Use different visual indicators for stdout vs stderr
 		if streamType == "stderr" {
-			fmt.Printf("[%s] [%s] ❌ %s\n", timestamp, commandName, line)
+			fmt.Printf("[%s] [%s] [%s] ❌ %s\n", timestamp, cmdType, commandName, line)
 		} else {
-			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
+			fmt.Printf("[%s] [%s] [%s] ✓  %s\n", timestamp, cmdType, commandName, line)
 		}
 
 		// Ensure immediate output by flushing stdout
@@ -301,8 +327,8 @@ func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Build
 	}
 
 	if err := scanner.Err(); err != nil && !strings.Contains(err.Error(), "file already closed") {
-		fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
-			time.Now().Format("15:04:05.000"), commandName, streamType, err)
+		fmt.Printf("[%s] [%s] [%s] ❌ Error reading %s: %v\n",
+			time.Now().Format("15:04:05.000"), cmdType, commandName, streamType, err)
 		os.Stdout.Sync()
 	}
 }
@@ -419,12 +445,12 @@ func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result 
 	streamWg.Add(2)
 	go func() {
 		defer streamWg.Done()
-		e.streamOutputContinuousWithContext(streamCtx, stdoutPipe, name, "stdout")
+		e.streamOutputContinuousWithContext(streamCtx, stdoutPipe, name, "stdout", result.Command.Command)
 	}()
 
 	go func() {
 		defer streamWg.Done()
-		e.streamOutputContinuousWithContext(streamCtx, stderrPipe, name, "stderr")
+		e.streamOutputContinuousWithContext(streamCtx, stderrPipe, name, "stderr", result.Command.Command)
 	}()
 
 	// Monitor the process and streaming lifecycle
@@ -440,7 +466,7 @@ func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result 
 	return result, nil
 }
 
-func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, streamType string) {
+func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, streamType, command string) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
@@ -451,6 +477,7 @@ func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, strea
 		pipe.Close()
 	}()
 
+	cmdType := e.detectCommandType(command)
 	scanner := bufio.NewScanner(pipe)
 
 	// Set a smaller buffer size to reduce latency for real-time streaming
@@ -466,12 +493,12 @@ func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, strea
 		line := scanner.Text()
 		timestamp := time.Now().Format("15:04:05.000")
 
-		// Write to console with timestamp and command identification
+		// Write to console with timestamp, type, and command identification
 		// Use different visual indicators for stdout vs stderr
 		if streamType == "stderr" {
-			fmt.Printf("[%s] [%s] ❌ %s\n", timestamp, commandName, line)
+			fmt.Printf("[%s] [%s] [%s] ❌ %s\n", timestamp, cmdType, commandName, line)
 		} else {
-			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
+			fmt.Printf("[%s] [%s] [%s] ✓  %s\n", timestamp, cmdType, commandName, line)
 		}
 
 		// Ensure immediate output by flushing stdout for real-time streaming
@@ -479,13 +506,13 @@ func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, strea
 	}
 
 	if err := scanner.Err(); err != nil && !e.isStopped() && !strings.Contains(err.Error(), "file already closed") {
-		fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
-			time.Now().Format("15:04:05.000"), commandName, streamType, err)
+		fmt.Printf("[%s] [%s] [%s] ❌ Error reading %s: %v\n",
+			time.Now().Format("15:04:05.000"), cmdType, commandName, streamType, err)
 		os.Stdout.Sync()
 	}
 }
 
-func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe io.ReadCloser, commandName, streamType string) {
+func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe io.ReadCloser, commandName, streamType, command string) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
@@ -496,6 +523,7 @@ func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe i
 		pipe.Close()
 	}()
 
+	cmdType := e.detectCommandType(command)
 	scanner := bufio.NewScanner(pipe)
 
 	// Set a smaller buffer size to reduce latency for real-time streaming
@@ -508,7 +536,7 @@ func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe i
 		case <-ctx.Done():
 			// Streaming has been cancelled, but process continues running
 			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [%s] [streaming] Detached from output streaming (process continues in background)\n", timestamp, commandName)
+			fmt.Printf("[%s] [%s] [%s] [streaming] Detached from output streaming (process continues in background)\n", timestamp, cmdType, commandName)
 			os.Stdout.Sync()
 			return
 		default:
@@ -521,12 +549,12 @@ func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe i
 		line := scanner.Text()
 		timestamp := time.Now().Format("15:04:05.000")
 
-		// Write to console with timestamp and command identification
+		// Write to console with timestamp, type, and command identification
 		// Use different visual indicators for stdout vs stderr
 		if streamType == "stderr" {
-			fmt.Printf("[%s] [%s] ❌ %s\n", timestamp, commandName, line)
+			fmt.Printf("[%s] [%s] [%s] ❌ %s\n", timestamp, cmdType, commandName, line)
 		} else {
-			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
+			fmt.Printf("[%s] [%s] [%s] ✓  %s\n", timestamp, cmdType, commandName, line)
 		}
 
 		// Ensure immediate output by flushing stdout for real-time streaming
@@ -539,8 +567,8 @@ func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe i
 		case <-ctx.Done():
 			// Context was cancelled, this is expected
 		default:
-			fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
-				time.Now().Format("15:04:05.000"), commandName, streamType, err)
+			fmt.Printf("[%s] [%s] [%s] ❌ Error reading %s: %v\n",
+				time.Now().Format("15:04:05.000"), cmdType, commandName, streamType, err)
 			os.Stdout.Sync()
 		}
 	}

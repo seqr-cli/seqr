@@ -97,21 +97,10 @@ func (pm *ProcessManager) terminateGracefully(process *os.Process, info *Process
 		return pm.terminateGracefullyFallback(process, info)
 	}
 
-	// Wait up to 10 seconds for graceful shutdown
-	done := make(chan error, 1)
-	go func() {
-		_, err := process.Wait()
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		// Process exited gracefully
-		return err
-	case <-time.After(10 * time.Second):
-		// Timeout, force kill the process group
+	// Wait up to 10 seconds for graceful shutdown by checking if process is removed from tracking
+	return pm.waitForProcessRemoval(process.Pid, 10*time.Second, func() error {
 		return pm.forceKillProcessGroup(process, info)
-	}
+	})
 }
 
 // forceKill forcefully terminates a process with SIGKILL
@@ -122,9 +111,10 @@ func (pm *ProcessManager) forceKill(process *os.Process, info *ProcessInfo) erro
 		return pm.forceKillFallback(process, info)
 	}
 
-	// Wait for process to exit (should be immediate with force kill)
-	_, err := process.Wait()
-	return err
+	// Wait for process to be removed from tracking
+	return pm.waitForProcessRemoval(process.Pid, 5*time.Second, func() error {
+		return fmt.Errorf("timeout waiting for process %d to terminate", process.Pid)
+	})
 }
 
 // GetProcessCount returns the number of currently tracked processes
@@ -155,21 +145,10 @@ func (pm *ProcessManager) terminateGracefullyFallback(process *os.Process, info 
 		return fmt.Errorf("failed to send SIGTERM: %w", err)
 	}
 
-	// Wait up to 10 seconds for graceful shutdown
-	done := make(chan error, 1)
-	go func() {
-		_, err := process.Wait()
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		// Process exited gracefully
-		return err
-	case <-time.After(10 * time.Second):
-		// Timeout, force kill
+	// Wait up to 10 seconds for graceful shutdown by checking if process is removed from tracking
+	return pm.waitForProcessRemoval(process.Pid, 10*time.Second, func() error {
 		return pm.forceKillFallback(process, info)
-	}
+	})
 }
 
 // forceKillFallback forcefully terminates a single process with SIGKILL
@@ -179,9 +158,10 @@ func (pm *ProcessManager) forceKillFallback(process *os.Process, info *ProcessIn
 		return fmt.Errorf("failed to send SIGKILL: %w", err)
 	}
 
-	// Wait for process to exit (should be immediate with SIGKILL)
-	_, err := process.Wait()
-	return err
+	// Wait for process to be removed from tracking
+	return pm.waitForProcessRemoval(process.Pid, 5*time.Second, func() error {
+		return fmt.Errorf("timeout waiting for process %d to terminate", process.Pid)
+	})
 }
 
 // forceKillProcessGroup forcefully terminates a process group
@@ -192,7 +172,26 @@ func (pm *ProcessManager) forceKillProcessGroup(process *os.Process, info *Proce
 		return pm.forceKillFallback(process, info)
 	}
 
-	// Wait for process to exit (should be immediate with force kill)
-	_, err := process.Wait()
-	return err
+	// Wait for process to be removed from tracking
+	return pm.waitForProcessRemoval(process.Pid, 5*time.Second, func() error {
+		return fmt.Errorf("timeout waiting for process %d to terminate", process.Pid)
+	})
+}
+
+// waitForProcessRemoval waits for a process to be removed from tracking
+func (pm *ProcessManager) waitForProcessRemoval(pid int, timeout time.Duration, onTimeout func() error) error {
+	timeoutChan := time.After(timeout)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-timeoutChan:
+			return onTimeout()
+		case <-ticker.C:
+			if _, exists := pm.tracker.GetProcess(pid); !exists {
+				return nil
+			}
+		}
+	}
 }
