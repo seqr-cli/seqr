@@ -1,8 +1,10 @@
 package executor
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -116,6 +118,11 @@ func (e *Executor) executeCommand(ctx context.Context, cmd config.Command) (Exec
 }
 
 func (e *Executor) executeOnce(execCmd *exec.Cmd, result ExecutionResult) (ExecutionResult, error) {
+	if e.verbose {
+		return e.executeOnceWithRealTimeOutput(execCmd, result)
+	}
+
+	// Non-verbose mode: use existing behavior
 	output, err := execCmd.CombinedOutput()
 
 	result.EndTime = time.Now()
@@ -138,7 +145,108 @@ func (e *Executor) executeOnce(execCmd *exec.Cmd, result ExecutionResult) (Execu
 	return result, nil
 }
 
+func (e *Executor) executeOnceWithRealTimeOutput(execCmd *exec.Cmd, result ExecutionResult) (ExecutionResult, error) {
+	// Create pipes for stdout and stderr
+	stdoutPipe, err := execCmd.StdoutPipe()
+	if err != nil {
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Success = false
+		result.Error = fmt.Sprintf("failed to create stdout pipe: %v", err)
+		result.ExitCode = -1
+		return result, err
+	}
+
+	stderrPipe, err := execCmd.StderrPipe()
+	if err != nil {
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Success = false
+		result.Error = fmt.Sprintf("failed to create stderr pipe: %v", err)
+		result.ExitCode = -1
+		return result, err
+	}
+
+	// Start the command
+	if err := execCmd.Start(); err != nil {
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Success = false
+		result.Error = err.Error()
+		result.ExitCode = -1
+		return result, err
+	}
+
+	// Capture output in real-time
+	var outputBuilder strings.Builder
+	var wg sync.WaitGroup
+
+	// Stream stdout
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		e.streamOutput(stdoutPipe, &outputBuilder, result.Command.Name, "stdout")
+	}()
+
+	// Stream stderr
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		e.streamOutput(stderrPipe, &outputBuilder, result.Command.Name, "stderr")
+	}()
+
+	// Wait for command to complete
+	err = execCmd.Wait()
+
+	// Wait for all output streaming to complete
+	wg.Wait()
+
+	result.EndTime = time.Now()
+	result.Duration = result.EndTime.Sub(result.StartTime)
+	result.Output = strings.TrimSpace(outputBuilder.String())
+
+	if err != nil {
+		result.Success = false
+		result.Error = err.Error()
+		if exitError, ok := err.(*exec.ExitError); ok {
+			result.ExitCode = exitError.ExitCode()
+		} else {
+			result.ExitCode = -1
+		}
+		return result, err
+	}
+
+	result.Success = true
+	result.ExitCode = 0
+	return result, nil
+}
+
+func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Builder, commandName, streamType string) {
+	scanner := bufio.NewScanner(pipe)
+	for scanner.Scan() {
+		line := scanner.Text()
+		timestamp := time.Now().Format("15:04:05.000")
+
+		// Write to console with timestamp and command identification
+		fmt.Printf("[%s] [%s] [%s] %s\n", timestamp, commandName, streamType, line)
+
+		// Also capture for the result output
+		outputBuilder.WriteString(line)
+		outputBuilder.WriteString("\n")
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("[%s] [%s] [%s] Error reading output: %v\n",
+			time.Now().Format("15:04:05.000"), commandName, streamType, err)
+	}
+}
+
 func (e *Executor) executeKeepAlive(execCmd *exec.Cmd, result ExecutionResult, name string) (ExecutionResult, error) {
+	if e.verbose {
+		return e.executeKeepAliveWithRealTimeOutput(execCmd, result, name)
+	}
+
+	// Non-verbose mode: use existing behavior
 	err := execCmd.Start()
 
 	result.EndTime = time.Now()
@@ -163,6 +271,73 @@ func (e *Executor) executeKeepAlive(execCmd *exec.Cmd, result ExecutionResult, n
 	return result, nil
 }
 
+func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result ExecutionResult, name string) (ExecutionResult, error) {
+	// Create pipes for stdout and stderr
+	stdoutPipe, err := execCmd.StdoutPipe()
+	if err != nil {
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Success = false
+		result.Error = fmt.Sprintf("failed to create stdout pipe: %v", err)
+		result.ExitCode = -1
+		return result, err
+	}
+
+	stderrPipe, err := execCmd.StderrPipe()
+	if err != nil {
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Success = false
+		result.Error = fmt.Sprintf("failed to create stderr pipe: %v", err)
+		result.ExitCode = -1
+		return result, err
+	}
+
+	// Start the command
+	if err := execCmd.Start(); err != nil {
+		result.EndTime = time.Now()
+		result.Duration = result.EndTime.Sub(result.StartTime)
+		result.Success = false
+		result.Error = err.Error()
+		result.ExitCode = -1
+		return result, err
+	}
+
+	e.mu.Lock()
+	e.processes[name] = execCmd
+	e.mu.Unlock()
+
+	// Start streaming output in background goroutines
+	go e.streamOutputContinuous(stdoutPipe, name, "stdout")
+	go e.streamOutputContinuous(stderrPipe, name, "stderr")
+
+	// Monitor the process
+	go e.monitorProcess(name, execCmd)
+
+	result.EndTime = time.Now()
+	result.Duration = result.EndTime.Sub(result.StartTime)
+	result.Success = true
+	result.ExitCode = 0
+	result.Output = fmt.Sprintf("started with PID %d", execCmd.Process.Pid)
+	return result, nil
+}
+
+func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, streamType string) {
+	scanner := bufio.NewScanner(pipe)
+	for scanner.Scan() {
+		line := scanner.Text()
+		timestamp := time.Now().Format("15:04:05.000")
+
+		// Write to console with timestamp and command identification
+		fmt.Printf("[%s] [%s] [%s] %s\n", timestamp, commandName, streamType, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("[%s] [%s] [%s] Error reading output: %v\n",
+			time.Now().Format("15:04:05.000"), commandName, streamType, err)
+	}
+}
+
 func (e *Executor) monitorProcess(name string, cmd *exec.Cmd) {
 	err := cmd.Wait()
 
@@ -171,10 +346,11 @@ func (e *Executor) monitorProcess(name string, cmd *exec.Cmd) {
 	e.mu.Unlock()
 
 	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
 		if err != nil {
-			fmt.Printf("Process '%s' exited with error: %v\n", name, err)
+			fmt.Printf("[%s] [%s] [process] Process exited with error: %v\n", timestamp, name, err)
 		} else {
-			fmt.Printf("Process '%s' exited cleanly\n", name)
+			fmt.Printf("[%s] [%s] [process] Process exited cleanly\n", timestamp, name)
 		}
 	}
 }

@@ -99,7 +99,7 @@ Command Output → [Output Capture] → Live Stream + Verbose Log
 
 ### Tasks
 - [x] **2.1** Add --verbose flag support to CLI
-- [ ] **2.2** Implement real-time output capture from commands
+- [x] **2.2** Implement real-time output capture from commands
 - [ ] **2.3** Add timestamps and command identification to verbose output
 - [ ] **2.4** Distinguish stdout/stderr in verbose display
 - [ ] **2.5** Maintain live streaming during command execution
