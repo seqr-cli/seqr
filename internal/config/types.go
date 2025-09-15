@@ -14,21 +14,23 @@ const (
 )
 
 type Command struct {
-	Name    string            `json:"name"`
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Mode    Mode              `json:"mode"`
-	WorkDir string            `json:"workDir,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Name       string            `json:"name"`
+	Command    string            `json:"command"`
+	Args       []string          `json:"args,omitempty"`
+	Mode       Mode              `json:"mode"`
+	WorkDir    string            `json:"workDir,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Concurrent bool              `json:"concurrent,omitempty"` // Allow concurrent execution with other concurrent commands
 }
 
 // FlexibleCommand represents a command that can be parsed from multiple formats
 type FlexibleCommand struct {
-	Name    string            `json:"name,omitempty"`
-	Command interface{}       `json:"command"` // Can be string, []string, or object
-	Mode    Mode              `json:"mode,omitempty"`
-	WorkDir string            `json:"workDir,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
+	Name       string            `json:"name,omitempty"`
+	Command    interface{}       `json:"command"` // Can be string, []string, or object
+	Mode       Mode              `json:"mode,omitempty"`
+	WorkDir    string            `json:"workDir,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	Concurrent bool              `json:"concurrent,omitempty"` // Allow concurrent execution with other concurrent commands
 }
 
 // FlexibleConfig represents a configuration that supports multiple command formats
@@ -81,10 +83,11 @@ func (m *Mode) UnmarshalJSON(data []byte) error {
 // ToStandardCommand converts a FlexibleCommand to a standard Command
 func (fc *FlexibleCommand) ToStandardCommand() (*Command, error) {
 	cmd := &Command{
-		Name:    fc.Name,
-		Mode:    fc.Mode,
-		WorkDir: fc.WorkDir,
-		Env:     fc.Env,
+		Name:       fc.Name,
+		Mode:       fc.Mode,
+		WorkDir:    fc.WorkDir,
+		Env:        fc.Env,
+		Concurrent: fc.Concurrent,
 	}
 
 	// Set default mode if not specified

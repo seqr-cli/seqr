@@ -57,7 +57,11 @@ func (e *Executor) Execute(ctx context.Context, cfg *config.Config) error {
 
 	e.reporter.ReportStart(len(cfg.Commands))
 
-	for i, cmd := range cfg.Commands {
+	// Group commands by concurrent execution
+	commandGroups := e.groupCommandsByConcurrency(cfg.Commands)
+
+	commandIndex := 0
+	for _, group := range commandGroups {
 		if e.isStopped() {
 			return fmt.Errorf("execution stopped")
 		}
@@ -68,23 +72,30 @@ func (e *Executor) Execute(ctx context.Context, cfg *config.Config) error {
 		default:
 		}
 
-		e.updateCurrentCommand(&cmd)
-		e.reporter.ReportCommandStart(cmd.Name, i)
+		if len(group) == 1 {
+			// Single command - execute sequentially
+			cmd := group[0]
+			e.updateCurrentCommand(&cmd)
+			e.reporter.ReportCommandStart(cmd.Name, commandIndex)
 
-		result, err := e.executeCommand(ctx, cmd)
-		e.addResult(result)
+			result, err := e.executeCommand(ctx, cmd)
+			e.addResult(result)
 
-		if err != nil {
-			e.reporter.ReportCommandFailure(result, i)
-			e.updateState(StateFailed, err.Error())
-			return err
+			if err != nil {
+				e.reporter.ReportCommandFailure(result, commandIndex)
+				e.updateState(StateFailed, err.Error())
+				return err
+			}
+
+			e.reporter.ReportCommandSuccess(result, commandIndex)
+			e.updateCompletedCount(commandIndex + 1)
+			commandIndex++
+		} else {
+			// Multiple concurrent commands - execute in parallel
+			if err := e.executeConcurrentCommands(ctx, group, &commandIndex); err != nil {
+				return err
+			}
 		}
-
-		e.reporter.ReportCommandSuccess(result, i)
-		e.updateCompletedCount(i + 1)
-
-		// For keepAlive commands, don't wait for completion - they run in background
-		// The execution continues immediately to the next command
 	}
 
 	e.updateState(StateSuccess, "")
@@ -948,4 +959,123 @@ func (e *Executor) forceKillProcessGroupWithTimeout(process *os.Process, name st
 			fmt.Printf("[%s] [%s] [process] Warning: Force kill timeout on process group (PID %d) - processes may be in uninterruptible state\n", timestamp, name, process.Pid)
 		}
 	}
+}
+
+// groupCommandsByConcurrency groups commands into execution groups based on concurrent flag
+func (e *Executor) groupCommandsByConcurrency(commands []config.Command) [][]config.Command {
+	var groups [][]config.Command
+	var currentConcurrentGroup []config.Command
+
+	for _, cmd := range commands {
+		if cmd.Concurrent {
+			// Add to current concurrent group
+			currentConcurrentGroup = append(currentConcurrentGroup, cmd)
+		} else {
+			// Non-concurrent command - flush any pending concurrent group first
+			if len(currentConcurrentGroup) > 0 {
+				groups = append(groups, currentConcurrentGroup)
+				currentConcurrentGroup = nil
+			}
+			// Add as single command group
+			groups = append(groups, []config.Command{cmd})
+		}
+	}
+
+	// Flush any remaining concurrent group
+	if len(currentConcurrentGroup) > 0 {
+		groups = append(groups, currentConcurrentGroup)
+	}
+
+	return groups
+}
+
+// executeConcurrentCommands executes a group of commands concurrently
+func (e *Executor) executeConcurrentCommands(ctx context.Context, commands []config.Command, commandIndex *int) error {
+	if len(commands) == 0 {
+		return nil
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [seqr] [concurrent] Starting %d commands concurrently\n", timestamp, len(commands))
+		for _, cmd := range commands {
+			fmt.Printf("[%s] [seqr] [concurrent] - %s\n", timestamp, cmd.Name)
+		}
+		os.Stdout.Sync()
+	}
+
+	// Channel to collect results from concurrent executions
+	type concurrentResult struct {
+		index  int
+		result ExecutionResult
+		err    error
+	}
+
+	resultChan := make(chan concurrentResult, len(commands))
+	var wg sync.WaitGroup
+
+	// Start all concurrent commands
+	for i, cmd := range commands {
+		wg.Add(1)
+		go func(cmdIndex int, command config.Command) {
+			defer wg.Done()
+
+			// Report command start
+			currentIndex := *commandIndex + cmdIndex
+			e.reporter.ReportCommandStart(command.Name, currentIndex)
+
+			// Execute the command
+			result, err := e.executeCommand(ctx, command)
+
+			// Send result through channel
+			resultChan <- concurrentResult{
+				index:  cmdIndex,
+				result: result,
+				err:    err,
+			}
+		}(i, cmd)
+	}
+
+	// Wait for all commands to complete
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	// Collect results and handle errors
+	results := make([]ExecutionResult, len(commands))
+	var firstError error
+
+	for result := range resultChan {
+		results[result.index] = result.result
+		e.addResult(result.result)
+
+		currentIndex := *commandIndex + result.index
+		if result.err != nil {
+			e.reporter.ReportCommandFailure(result.result, currentIndex)
+			if firstError == nil {
+				firstError = result.err
+			}
+		} else {
+			e.reporter.ReportCommandSuccess(result.result, currentIndex)
+		}
+	}
+
+	// Update command index
+	*commandIndex += len(commands)
+	e.updateCompletedCount(*commandIndex)
+
+	// If any command failed, return the first error
+	if firstError != nil {
+		e.updateState(StateFailed, firstError.Error())
+		return firstError
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [seqr] [concurrent] All %d concurrent commands completed successfully\n", timestamp, len(commands))
+		os.Stdout.Sync()
+	}
+
+	return nil
 }

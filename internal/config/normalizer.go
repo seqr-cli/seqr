@@ -27,15 +27,21 @@ func NewStrictNormalizer() *Normalizer {
 
 // NormalizeCommand converts any supported command format to the unified Command structure
 func (n *Normalizer) NormalizeCommand(input interface{}, name string, mode Mode, workDir string, env map[string]string) (*Command, error) {
+	return n.NormalizeCommandWithConcurrent(input, name, mode, workDir, env, false)
+}
+
+// NormalizeCommandWithConcurrent converts any supported command format to the unified Command structure with concurrent flag
+func (n *Normalizer) NormalizeCommandWithConcurrent(input interface{}, name string, mode Mode, workDir string, env map[string]string, concurrent bool) (*Command, error) {
 	if input == nil {
 		return nil, n.createDetailedError("command input cannot be nil", input, "Ensure the command field is not null")
 	}
 
 	cmd := &Command{
-		Name:    name,
-		Mode:    mode,
-		WorkDir: workDir,
-		Env:     env,
+		Name:       name,
+		Mode:       mode,
+		WorkDir:    workDir,
+		Env:        env,
+		Concurrent: concurrent,
 	}
 
 	// Set default mode if not specified
@@ -368,6 +374,11 @@ func (n *Normalizer) normalizeConfigCommand(cmdInterface interface{}, index int,
 		return err
 	}
 
+	concurrent, err := n.extractBoolField(cmdMap, "concurrent", index)
+	if err != nil {
+		return err
+	}
+
 	// Extract and normalize the command field
 	commandField, hasCommand := cmdMap["command"]
 	if !hasCommand {
@@ -393,12 +404,13 @@ func (n *Normalizer) normalizeConfigCommand(cmdInterface interface{}, index int,
 
 			// Create command directly for standard format
 			normalizedCmd = &Command{
-				Name:    name,
-				Command: cmdStr,
-				Args:    args,
-				Mode:    mode,
-				WorkDir: workDir,
-				Env:     env,
+				Name:       name,
+				Command:    cmdStr,
+				Args:       args,
+				Mode:       mode,
+				WorkDir:    workDir,
+				Env:        env,
+				Concurrent: concurrent,
 			}
 
 			// Set default mode if not specified
@@ -412,11 +424,11 @@ func (n *Normalizer) normalizeConfigCommand(cmdInterface interface{}, index int,
 			}
 		} else {
 			// String format without separate args - use normalizer
-			normalizedCmd, normErr = n.NormalizeCommand(commandField, name, mode, workDir, env)
+			normalizedCmd, normErr = n.NormalizeCommandWithConcurrent(commandField, name, mode, workDir, env, concurrent)
 		}
 	} else {
 		// Array or object format - use normalizer
-		normalizedCmd, normErr = n.NormalizeCommand(commandField, name, mode, workDir, env)
+		normalizedCmd, normErr = n.NormalizeCommandWithConcurrent(commandField, name, mode, workDir, env, concurrent)
 	}
 
 	if normErr != nil {
@@ -531,6 +543,22 @@ func (n *Normalizer) extractArgsField(argsInterface interface{}, index int) ([]s
 		Value:        argsInterface,
 		Suggestion:   "Arguments should be an array of strings: \"args\": [\"--port\", \"3000\"]",
 	}
+}
+
+func (n *Normalizer) extractBoolField(cmdMap map[string]interface{}, fieldName string, index int) (bool, error) {
+	if fieldInterface, hasField := cmdMap[fieldName]; hasField {
+		if fieldBool, ok := fieldInterface.(bool); ok {
+			return fieldBool, nil
+		}
+		return false, ConfigNormalizationError{
+			Message:      fmt.Sprintf("%s must be a boolean, got %T", fieldName, fieldInterface),
+			CommandIndex: index,
+			Field:        fieldName,
+			Value:        fieldInterface,
+			Suggestion:   fmt.Sprintf("Set %s to true or false", fieldName),
+		}
+	}
+	return false, nil
 }
 
 // aggregateConfigErrors combines multiple configuration errors into a single comprehensive error

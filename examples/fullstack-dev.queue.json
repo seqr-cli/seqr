@@ -49,7 +49,8 @@
       "env": {
         "NODE_ENV": "development",
         "DATABASE_URL": "postgresql://postgres:devpass@localhost:5432/myapp"
-      }
+      },
+      "concurrent": true
     },
     {
       "name": "start-frontend",
@@ -62,7 +63,8 @@
       "workDir": "./frontend",
       "env": {
         "VITE_API_URL": "http://localhost:3000"
-      }
+      },
+      "concurrent": true
     }
   ]
 }
