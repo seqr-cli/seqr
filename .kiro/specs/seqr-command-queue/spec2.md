@@ -165,7 +165,7 @@ Command Output → [Output Capture] → Live Stream + Verbose Log
 - [x] **4.3** Add graceful shutdown with SIGTERM
 - [x] **4.4** Implement force termination with SIGKILL after timeout
 - [x] **4.5** Ensure cleanup of all child processes
-- [ ] **4.6** Test termination scenarios with various process types
+- [x] **4.6** Test termination scenarios with various process types
 
 ---
 
