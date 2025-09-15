@@ -58,6 +58,25 @@ func main() {
 		os.Exit(0)
 	}
 
+	if cliApp.ShouldRunWatch() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+		go func() {
+			<-sigChan
+			cancel()
+		}()
+
+		if err := cliApp.RunWatch(ctx); err != nil {
+			os.Stderr.WriteString("Error: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

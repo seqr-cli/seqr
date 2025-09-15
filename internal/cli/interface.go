@@ -37,6 +37,12 @@ type Interface interface {
 	// RunStatus shows the status of running seqr processes
 	RunStatus() error
 
+	// ShouldRunWatch returns true if watch should be executed
+	ShouldRunWatch() bool
+
+	// RunWatch shows live output from running seqr processes
+	RunWatch(ctx context.Context) error
+
 	// Run executes the CLI application with the parsed options
 	Run(ctx context.Context) error
 

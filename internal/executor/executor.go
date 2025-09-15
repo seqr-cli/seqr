@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -15,6 +16,183 @@ import (
 
 	"github.com/seqr-cli/seqr/internal/config"
 )
+
+// Color codes for cross-platform terminal output
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorCyan   = "\033[36m"
+	colorWhite  = "\033[37m"
+	colorGray   = "\033[90m"
+)
+
+// isColorSupported checks if the terminal supports colors
+func isColorSupported() bool {
+	// Check for NO_COLOR environment variable
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+
+	// Check for TERM=dumb
+	if os.Getenv("TERM") == "dumb" {
+		return false
+	}
+
+	// On Windows, check if we're running in a terminal that supports ANSI
+	if runtime.GOOS == "windows" {
+		// Windows 10 version 1511+ supports ANSI colors
+		return true // Assume modern Windows supports it
+	}
+
+	return true
+}
+
+// colorize wraps text with color codes if colors are supported
+func colorize(text, color string) string {
+	if !isColorSupported() {
+		return text
+	}
+	return color + text + colorReset
+}
+
+// colorizeCommandType returns a colorized version of the command type
+func (e *Executor) colorizeCommandType(cmdType string) string {
+	switch cmdType {
+	case "docker":
+		return colorize(cmdType, colorBlue)
+	case "vite":
+		return colorize(cmdType, colorPurple)
+	case "node":
+		return colorize(cmdType, colorGreen)
+	case "bun":
+		return colorize(cmdType, colorYellow)
+	case "npm":
+		return colorize(cmdType, colorRed)
+	case "yarn":
+		return colorize(cmdType, colorCyan)
+	case "pnpm":
+		return colorize(cmdType, colorPurple)
+	default:
+		return colorize(cmdType, colorWhite)
+	}
+}
+
+// BackgroundLogger handles logging of background process output
+type BackgroundLogger struct {
+	logDir string
+}
+
+// NewBackgroundLogger creates a new background logger
+func NewBackgroundLogger() *BackgroundLogger {
+	// Use a more persistent location for logs
+	var logDir string
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		logDir = filepath.Join(homeDir, ".seqr", "logs")
+	} else {
+		// Fallback to temp directory if home directory is not available
+		logDir = filepath.Join(os.TempDir(), "seqr-logs")
+	}
+	os.MkdirAll(logDir, 0755)
+	return &BackgroundLogger{logDir: logDir}
+}
+
+// GetLogFile returns the log file path for a process
+func (bl *BackgroundLogger) GetLogFile(processName string) string {
+	return filepath.Join(bl.logDir, fmt.Sprintf("%s.log", processName))
+}
+
+// GetLogDir returns the log directory path
+func (bl *BackgroundLogger) GetLogDir() string {
+	return bl.logDir
+}
+
+// WriteLog writes output to the log file
+func (bl *BackgroundLogger) WriteLog(processName, output string) error {
+	logFile := bl.GetLogFile(processName)
+	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	timestamp := time.Now().Format("2006-01-02 15:04:05")
+	_, err = fmt.Fprintf(f, "[%s] %s\n", timestamp, output)
+	return err
+}
+
+// ReadRecentLogs reads the last N lines from a process log
+func (bl *BackgroundLogger) ReadRecentLogs(processName string, lines int) ([]string, error) {
+	logFile := bl.GetLogFile(processName)
+	f, err := os.Open(logFile)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var logLines []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		logLines = append(logLines, scanner.Text())
+		if len(logLines) > lines {
+			logLines = logLines[1:] // Keep only the last N lines
+		}
+	}
+
+	return logLines, scanner.Err()
+}
+
+// ListAvailableLogs returns a list of all available log files
+func (bl *BackgroundLogger) ListAvailableLogs() ([]string, error) {
+	files, err := os.ReadDir(bl.logDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var logFiles []string
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".log") {
+			processName := strings.TrimSuffix(file.Name(), ".log")
+			logFiles = append(logFiles, processName)
+		}
+	}
+
+	return logFiles, nil
+}
+
+// CleanupOldLogs removes log files older than the specified duration
+func (bl *BackgroundLogger) CleanupOldLogs(maxAge time.Duration) error {
+	files, err := os.ReadDir(bl.logDir)
+	if err != nil {
+		return err
+	}
+
+	cutoff := time.Now().Add(-maxAge)
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".log") {
+			filePath := filepath.Join(bl.logDir, file.Name())
+			info, err := file.Info()
+			if err != nil {
+				continue
+			}
+
+			if info.ModTime().Before(cutoff) {
+				os.Remove(filePath)
+			}
+		}
+	}
+
+	return nil
+}
+
+// GetLogInfo returns information about a log file
+func (bl *BackgroundLogger) GetLogInfo(processName string) (os.FileInfo, error) {
+	logFile := bl.GetLogFile(processName)
+	return os.Stat(logFile)
+}
 
 type Executor struct {
 	mu              sync.RWMutex
@@ -26,6 +204,7 @@ type Executor struct {
 	tracker         *ProcessTracker
 	monitor         *ProcessMonitor
 	streamingActive map[string]context.CancelFunc // Track active streaming sessions
+	logger          *BackgroundLogger
 }
 
 func NewExecutor(verbose bool) *Executor {
@@ -39,6 +218,7 @@ func NewExecutor(verbose bool) *Executor {
 		tracker:         tracker,
 		monitor:         monitor,
 		streamingActive: make(map[string]context.CancelFunc),
+		logger:          NewBackgroundLogger(),
 		status: ExecutionStatus{
 			State:   StateReady,
 			Results: make([]ExecutionResult, 0),
@@ -310,16 +490,28 @@ func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Build
 		line := scanner.Text()
 		timestamp := time.Now().Format("15:04:05.000")
 
+		// Colorize based on command type and stream type
+		coloredTimestamp := colorize(timestamp, colorGray)
+		coloredType := e.colorizeCommandType(cmdType)
+		coloredName := colorize(commandName, colorCyan)
+
 		// Write to console with timestamp, type, command identification
 		// Use different visual indicators for stdout vs stderr
+		var icon string
 		if streamType == "stderr" {
-			fmt.Printf("[%s] [%s] [%s] ❌ %s\n", timestamp, cmdType, commandName, line)
+			icon = colorize("❌", colorRed)
+			fmt.Printf("[%s] [%s] [%s] %s %s\n", coloredTimestamp, coloredType, coloredName, icon, line)
 		} else {
-			fmt.Printf("[%s] [%s] [%s] ✓  %s\n", timestamp, cmdType, commandName, line)
+			icon = colorize("✓", colorGreen)
+			fmt.Printf("[%s] [%s] [%s] %s %s\n", coloredTimestamp, coloredType, coloredName, icon, line)
 		}
 
 		// Ensure immediate output by flushing stdout
 		os.Stdout.Sync()
+
+		// Log to background logger for persistent storage
+		logLine := fmt.Sprintf("[%s] [%s] %s %s", coloredTimestamp, coloredType, icon, line)
+		e.logger.WriteLog(commandName, logLine)
 
 		// Also capture for the result output
 		outputBuilder.WriteString(line)
@@ -327,8 +519,13 @@ func (e *Executor) streamOutput(pipe io.ReadCloser, outputBuilder *strings.Build
 	}
 
 	if err := scanner.Err(); err != nil && !strings.Contains(err.Error(), "file already closed") {
-		fmt.Printf("[%s] [%s] [%s] ❌ Error reading %s: %v\n",
-			time.Now().Format("15:04:05.000"), cmdType, commandName, streamType, err)
+		timestamp := time.Now().Format("15:04:05.000")
+		coloredTimestamp := colorize(timestamp, colorGray)
+		coloredType := e.colorizeCommandType(cmdType)
+		coloredName := colorize(commandName, colorCyan)
+		errorIcon := colorize("❌", colorRed)
+		fmt.Printf("[%s] [%s] [%s] %s Error reading %s: %v\n",
+			coloredTimestamp, coloredType, coloredName, errorIcon, streamType, err)
 		os.Stdout.Sync()
 	}
 }
@@ -493,21 +690,38 @@ func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, strea
 		line := scanner.Text()
 		timestamp := time.Now().Format("15:04:05.000")
 
+		// Colorize output
+		coloredTimestamp := colorize(timestamp, colorGray)
+		coloredType := e.colorizeCommandType(cmdType)
+		coloredName := colorize(commandName, colorCyan)
+
 		// Write to console with timestamp, type, and command identification
 		// Use different visual indicators for stdout vs stderr
+		var icon string
 		if streamType == "stderr" {
-			fmt.Printf("[%s] [%s] [%s] ❌ %s\n", timestamp, cmdType, commandName, line)
+			icon = colorize("❌", colorRed)
+			fmt.Printf("[%s] [%s] [%s] %s %s\n", coloredTimestamp, coloredType, coloredName, icon, line)
 		} else {
-			fmt.Printf("[%s] [%s] [%s] ✓  %s\n", timestamp, cmdType, commandName, line)
+			icon = colorize("✓", colorGreen)
+			fmt.Printf("[%s] [%s] [%s] %s %s\n", coloredTimestamp, coloredType, coloredName, icon, line)
 		}
 
 		// Ensure immediate output by flushing stdout for real-time streaming
 		os.Stdout.Sync()
+
+		// Log to background logger for persistent storage
+		logLine := fmt.Sprintf("[%s] [%s] %s %s", coloredTimestamp, coloredType, icon, line)
+		e.logger.WriteLog(commandName, logLine)
 	}
 
 	if err := scanner.Err(); err != nil && !e.isStopped() && !strings.Contains(err.Error(), "file already closed") {
-		fmt.Printf("[%s] [%s] [%s] ❌ Error reading %s: %v\n",
-			time.Now().Format("15:04:05.000"), cmdType, commandName, streamType, err)
+		timestamp := time.Now().Format("15:04:05.000")
+		coloredTimestamp := colorize(timestamp, colorGray)
+		coloredType := e.colorizeCommandType(cmdType)
+		coloredName := colorize(commandName, colorCyan)
+		errorIcon := colorize("❌", colorRed)
+		fmt.Printf("[%s] [%s] [%s] %s Error reading %s: %v\n",
+			coloredTimestamp, coloredType, coloredName, errorIcon, streamType, err)
 		os.Stdout.Sync()
 	}
 }
@@ -536,7 +750,12 @@ func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe i
 		case <-ctx.Done():
 			// Streaming has been cancelled, but process continues running
 			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [%s] [%s] [streaming] Detached from output streaming (process continues in background)\n", timestamp, cmdType, commandName)
+			coloredTimestamp := colorize(timestamp, colorGray)
+			coloredType := e.colorizeCommandType(cmdType)
+			coloredName := colorize(commandName, colorCyan)
+			streamIcon := colorize("🔄", colorYellow)
+			fmt.Printf("[%s] [%s] [%s] %s Detached from output streaming (process continues in background)\n",
+				coloredTimestamp, coloredType, coloredName, streamIcon)
 			os.Stdout.Sync()
 			return
 		default:
@@ -549,16 +768,28 @@ func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe i
 		line := scanner.Text()
 		timestamp := time.Now().Format("15:04:05.000")
 
+		// Colorize output
+		coloredTimestamp := colorize(timestamp, colorGray)
+		coloredType := e.colorizeCommandType(cmdType)
+		coloredName := colorize(commandName, colorCyan)
+
 		// Write to console with timestamp, type, and command identification
 		// Use different visual indicators for stdout vs stderr
+		var icon string
 		if streamType == "stderr" {
-			fmt.Printf("[%s] [%s] [%s] ❌ %s\n", timestamp, cmdType, commandName, line)
+			icon = colorize("❌", colorRed)
+			fmt.Printf("[%s] [%s] [%s] %s %s\n", coloredTimestamp, coloredType, coloredName, icon, line)
 		} else {
-			fmt.Printf("[%s] [%s] [%s] ✓  %s\n", timestamp, cmdType, commandName, line)
+			icon = colorize("✓", colorGreen)
+			fmt.Printf("[%s] [%s] [%s] %s %s\n", coloredTimestamp, coloredType, coloredName, icon, line)
 		}
 
 		// Ensure immediate output by flushing stdout for real-time streaming
 		os.Stdout.Sync()
+
+		// Log to background logger for persistent storage
+		logLine := fmt.Sprintf("[%s] [%s] %s %s", coloredTimestamp, coloredType, icon, line)
+		e.logger.WriteLog(commandName, logLine)
 	}
 
 	if err := scanner.Err(); err != nil && !e.isStopped() && !strings.Contains(err.Error(), "file already closed") {
@@ -567,8 +798,13 @@ func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe i
 		case <-ctx.Done():
 			// Context was cancelled, this is expected
 		default:
-			fmt.Printf("[%s] [%s] [%s] ❌ Error reading %s: %v\n",
-				time.Now().Format("15:04:05.000"), cmdType, commandName, streamType, err)
+			timestamp := time.Now().Format("15:04:05.000")
+			coloredTimestamp := colorize(timestamp, colorGray)
+			coloredType := e.colorizeCommandType(cmdType)
+			coloredName := colorize(commandName, colorCyan)
+			errorIcon := colorize("❌", colorRed)
+			fmt.Printf("[%s] [%s] [%s] %s Error reading %s: %v\n",
+				coloredTimestamp, coloredType, coloredName, errorIcon, streamType, err)
 			os.Stdout.Sync()
 		}
 	}

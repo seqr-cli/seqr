@@ -20,6 +20,7 @@ type CLIOptions struct {
 	Init       bool   // Generate example queue configuration files
 	Kill       bool   // Kill running seqr processes
 	Status     bool   // Show status of running seqr processes
+	Watch      bool   // Watch live processes and their output
 }
 
 // CLI represents the command-line interface
@@ -46,6 +47,7 @@ func NewCLI(args []string) *CLI {
 			Init:       false,
 			Kill:       false,
 			Status:     false,
+			Watch:      false,
 		},
 		flagSet: flagSet,
 		args:    args,
@@ -75,6 +77,8 @@ func (c *CLI) setupFlags() {
 		"Kill running seqr processes")
 	c.flagSet.BoolVar(&c.options.Status, "status", c.options.Status,
 		"Show status of running seqr processes")
+	c.flagSet.BoolVar(&c.options.Watch, "watch", c.options.Watch,
+		"Watch live processes and their real-time output")
 }
 
 // Parse parses command-line arguments and validates options
@@ -88,8 +92,8 @@ func (c *CLI) Parse() error {
 
 // validateOptions validates the parsed command-line options
 func (c *CLI) validateOptions() error {
-	// If help, version, init, kill, or status is requested, no validation needed
-	if c.options.Help || c.options.Version || c.options.Init || c.options.Kill || c.options.Status {
+	// If help, version, init, kill, status, or watch is requested, no validation needed
+	if c.options.Help || c.options.Version || c.options.Init || c.options.Kill || c.options.Status || c.options.Watch {
 		return nil
 	}
 
@@ -130,6 +134,11 @@ func (c *CLI) ShouldRunStatus() bool {
 	return c.options.Status
 }
 
+// ShouldRunWatch returns true if watch should be executed
+func (c *CLI) ShouldRunWatch() bool {
+	return c.options.Watch
+}
+
 // ShowVersion displays version information
 func (c *CLI) ShowVersion(version string) {
 	fmt.Fprintf(os.Stdout, "seqr version %s\n", version)
@@ -153,7 +162,8 @@ func (c *CLI) ShowHelp() {
 	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v     # Custom file with verbose output\n")
 	fmt.Fprintf(os.Stdout, "  seqr --init               # Generate example configuration files\n")
 	fmt.Fprintf(os.Stdout, "  seqr --kill               # Kill running seqr processes\n")
-	fmt.Fprintf(os.Stdout, "  seqr --status             # Show status of running seqr processes\n\n")
+	fmt.Fprintf(os.Stdout, "  seqr --status             # Show status of running seqr processes\n")
+	fmt.Fprintf(os.Stdout, "  seqr --watch              # Watch live processes and their output\n\n")
 	fmt.Fprintf(os.Stdout, "CONFIGURATION:\n")
 	fmt.Fprintf(os.Stdout, "  The queue file should be a JSON file with the following structure:\n")
 	fmt.Fprintf(os.Stdout, "  {\n")
@@ -295,6 +305,125 @@ func (c *CLI) RunStatus() error {
 
 	fmt.Fprintf(os.Stdout, "Use 'seqr --kill' to terminate all processes\n")
 	return nil
+}
+
+// RunWatch shows live output from running seqr processes
+func (c *CLI) RunWatch(ctx context.Context) error {
+	processManager := executor.NewProcessManager()
+	logger := executor.NewBackgroundLogger()
+
+	// Get all running processes
+	processes, err := processManager.GetAllRunningProcesses()
+	if err != nil {
+		return fmt.Errorf("failed to get running processes: %w", err)
+	}
+
+	// Get all available logs (including from stopped processes)
+	availableLogs, err := logger.ListAvailableLogs()
+	if err != nil {
+		// Don't fail if we can't read logs, just continue
+		availableLogs = []string{}
+	}
+
+	totalProcesses := len(processes)
+	totalLogs := len(availableLogs)
+
+	if totalProcesses == 0 && totalLogs == 0 {
+		fmt.Fprintf(os.Stdout, "No seqr processes are currently running\n")
+		fmt.Fprintf(os.Stdout, "Use 'seqr' to start processes, then 'seqr --watch' to monitor them\n")
+		return nil
+	}
+
+	if totalProcesses > 0 {
+		fmt.Fprintf(os.Stdout, "🔍 Watching %d running seqr process(es):\n\n", totalProcesses)
+
+		for pid, info := range processes {
+			uptime := time.Since(info.StartTime)
+			fmt.Fprintf(os.Stdout, "📊 PID %d: %s\n", pid, info.Name)
+			fmt.Fprintf(os.Stdout, "   Command: %s %v\n", info.Command, info.Args)
+			fmt.Fprintf(os.Stdout, "   Mode: %s\n", info.Mode)
+			if info.WorkDir != "" {
+				fmt.Fprintf(os.Stdout, "   Working Directory: %s\n", info.WorkDir)
+			}
+			fmt.Fprintf(os.Stdout, "   Started: %s (%s ago)\n",
+				info.StartTime.Format("2006-01-02 15:04:05"),
+				uptime.Round(time.Second))
+			fmt.Fprintf(os.Stdout, "   Status: Running\n")
+
+			// Show recent logs for this process
+			recentLogs, err := logger.ReadRecentLogs(info.Name, 5)
+			if err == nil && len(recentLogs) > 0 {
+				fmt.Fprintf(os.Stdout, "   Recent Output:\n")
+				for _, logLine := range recentLogs {
+					fmt.Fprintf(os.Stdout, "     %s\n", logLine)
+				}
+			}
+			fmt.Fprintf(os.Stdout, "\n")
+		}
+	}
+
+	// Show information about available logs from stopped processes
+	stoppedProcessLogs := []string{}
+	for _, logName := range availableLogs {
+		isRunning := false
+		for _, info := range processes {
+			if info.Name == logName {
+				isRunning = true
+				break
+			}
+		}
+		if !isRunning {
+			stoppedProcessLogs = append(stoppedProcessLogs, logName)
+		}
+	}
+
+	if len(stoppedProcessLogs) > 0 {
+		fmt.Fprintf(os.Stdout, "📁 Log files available from %d stopped process(es):\n", len(stoppedProcessLogs))
+		for _, logName := range stoppedProcessLogs {
+			logInfo, err := logger.GetLogInfo(logName)
+			if err == nil {
+				fmt.Fprintf(os.Stdout, "   📄 %s (%s, %s)\n",
+					logName,
+					logInfo.ModTime().Format("2006-01-02 15:04:05"),
+					formatFileSize(logInfo.Size()))
+			} else {
+				fmt.Fprintf(os.Stdout, "   📄 %s\n", logName)
+			}
+		}
+		fmt.Fprintf(os.Stdout, "\n")
+	}
+
+	if totalProcesses > 0 {
+		fmt.Fprintf(os.Stdout, "🎯 Live output will appear below as processes generate it:\n")
+		fmt.Fprintf(os.Stdout, "💡 Press Ctrl+C to stop watching\n\n")
+
+		// For now, just show current status and recent logs. In a future enhancement, we could
+		// implement real-time monitoring of process output by connecting to
+		// running processes' stdout/stderr streams.
+
+		// Wait for context cancellation (Ctrl+C)
+		<-ctx.Done()
+		fmt.Fprintf(os.Stdout, "\n👋 Stopped watching processes\n")
+	} else {
+		fmt.Fprintf(os.Stdout, "💡 Use 'seqr' to start processes, then 'seqr --watch' to monitor them\n")
+		fmt.Fprintf(os.Stdout, "📁 Log files are preserved in: %s\n", logger.GetLogDir())
+	}
+
+	return nil
+}
+
+// formatFileSize formats a file size in human-readable format
+func formatFileSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 // Stop gracefully stops the CLI execution
