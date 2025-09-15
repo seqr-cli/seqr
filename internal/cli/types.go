@@ -250,3 +250,18 @@ func (c *CLI) Stop() {
 		c.executor.Stop()
 	}
 }
+
+// TryDetachFromStreaming attempts to detach from active streaming sessions
+// Returns true if detachment was successful, false if no streaming was active
+func (c *CLI) TryDetachFromStreaming() bool {
+	if c.executor == nil {
+		return false
+	}
+
+	if !c.executor.HasActiveStreaming() {
+		return false
+	}
+
+	c.executor.DetachFromStreaming()
+	return true
+}

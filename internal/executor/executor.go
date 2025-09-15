@@ -17,21 +17,23 @@ import (
 )
 
 type Executor struct {
-	mu        sync.RWMutex
-	status    ExecutionStatus
-	verbose   bool
-	stopped   bool
-	processes map[string]*exec.Cmd
-	reporter  Reporter
-	tracker   *ProcessTracker
+	mu              sync.RWMutex
+	status          ExecutionStatus
+	verbose         bool
+	stopped         bool
+	processes       map[string]*exec.Cmd
+	reporter        Reporter
+	tracker         *ProcessTracker
+	streamingActive map[string]context.CancelFunc // Track active streaming sessions
 }
 
 func NewExecutor(verbose bool) *Executor {
 	return &Executor{
-		verbose:   verbose,
-		processes: make(map[string]*exec.Cmd),
-		reporter:  NewConsoleReporter(os.Stdout, verbose),
-		tracker:   NewProcessTracker(),
+		verbose:         verbose,
+		processes:       make(map[string]*exec.Cmd),
+		reporter:        NewConsoleReporter(os.Stdout, verbose),
+		tracker:         NewProcessTracker(),
+		streamingActive: make(map[string]context.CancelFunc),
 		status: ExecutionStatus{
 			State:   StateReady,
 			Results: make([]ExecutionResult, 0),
@@ -374,25 +376,31 @@ func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result 
 		fmt.Printf("[%s] [%s] [process] Warning: Failed to track process: %v\n", timestamp, name, err)
 	}
 
+	// Create streaming context that can be cancelled independently of process lifecycle
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+
+	// Track the streaming session
+	e.mu.Lock()
+	e.streamingActive[name] = streamCancel
+	e.mu.Unlock()
+
 	// Start streaming output in background goroutines with proper lifecycle management
 	var streamWg sync.WaitGroup
 
 	streamWg.Add(2)
 	go func() {
 		defer streamWg.Done()
-		e.streamOutputContinuous(stdoutPipe, name, "stdout")
+		e.streamOutputContinuousWithContext(streamCtx, stdoutPipe, name, "stdout")
 	}()
 
 	go func() {
 		defer streamWg.Done()
-		e.streamOutputContinuous(stderrPipe, name, "stderr")
+		e.streamOutputContinuousWithContext(streamCtx, stderrPipe, name, "stderr")
 	}()
 
 	// Monitor the process and streaming lifecycle
 	go func() {
-		e.monitorProcess(name, execCmd)
-		// Wait for streaming to complete after process ends
-		streamWg.Wait()
+		e.monitorProcessWithStreaming(name, execCmd, streamCancel, &streamWg)
 	}()
 
 	result.EndTime = time.Now()
@@ -448,11 +456,106 @@ func (e *Executor) streamOutputContinuous(pipe io.ReadCloser, commandName, strea
 	}
 }
 
+func (e *Executor) streamOutputContinuousWithContext(ctx context.Context, pipe io.ReadCloser, commandName, streamType string) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[%s] [%s] ❌ Streaming panic recovered: %v\n",
+				time.Now().Format("15:04:05.000"), commandName, r)
+			os.Stdout.Sync()
+		}
+		// Ensure pipe is closed
+		pipe.Close()
+	}()
+
+	scanner := bufio.NewScanner(pipe)
+
+	// Set a smaller buffer size to reduce latency for real-time streaming
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+
+	for scanner.Scan() {
+		// Check if streaming context has been cancelled or executor has been stopped
+		select {
+		case <-ctx.Done():
+			// Streaming has been cancelled, but process continues running
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [streaming] Detached from output streaming (process continues in background)\n", timestamp, commandName)
+			os.Stdout.Sync()
+			return
+		default:
+		}
+
+		if e.isStopped() {
+			break
+		}
+
+		line := scanner.Text()
+		timestamp := time.Now().Format("15:04:05.000")
+
+		// Write to console with timestamp and command identification
+		// Use different visual indicators for stdout vs stderr
+		if streamType == "stderr" {
+			fmt.Printf("[%s] [%s] ❌ %s\n", timestamp, commandName, line)
+		} else {
+			fmt.Printf("[%s] [%s] ✓  %s\n", timestamp, commandName, line)
+		}
+
+		// Ensure immediate output by flushing stdout for real-time streaming
+		os.Stdout.Sync()
+	}
+
+	if err := scanner.Err(); err != nil && !e.isStopped() && !strings.Contains(err.Error(), "file already closed") {
+		// Only log errors if context hasn't been cancelled (streaming wasn't intentionally stopped)
+		select {
+		case <-ctx.Done():
+			// Context was cancelled, this is expected
+		default:
+			fmt.Printf("[%s] [%s] ❌ Error reading %s: %v\n",
+				time.Now().Format("15:04:05.000"), commandName, streamType, err)
+			os.Stdout.Sync()
+		}
+	}
+}
+
 func (e *Executor) monitorProcess(name string, cmd *exec.Cmd) {
 	err := cmd.Wait()
 
 	e.mu.Lock()
 	delete(e.processes, name)
+	e.mu.Unlock()
+
+	// Remove from process tracker
+	if cmd.Process != nil {
+		if trackErr := e.tracker.RemoveProcess(cmd.Process.Pid); trackErr != nil && e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Warning: Failed to untrack process: %v\n", timestamp, name, trackErr)
+		}
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		if err != nil {
+			fmt.Printf("[%s] [%s] [process] Process exited with error: %v\n", timestamp, name, err)
+		} else {
+			fmt.Printf("[%s] [%s] [process] Process exited cleanly\n", timestamp, name)
+		}
+		// Ensure immediate output for process status updates
+		os.Stdout.Sync()
+	}
+}
+
+func (e *Executor) monitorProcessWithStreaming(name string, cmd *exec.Cmd, streamCancel context.CancelFunc, streamWg *sync.WaitGroup) {
+	err := cmd.Wait()
+
+	// Cancel streaming when process ends
+	streamCancel()
+
+	// Wait for streaming goroutines to finish
+	streamWg.Wait()
+
+	e.mu.Lock()
+	delete(e.processes, name)
+	delete(e.streamingActive, name) // Clean up streaming tracking
 	e.mu.Unlock()
 
 	// Remove from process tracker
@@ -562,6 +665,60 @@ func (e *Executor) HasActiveKeepAliveProcesses() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return len(e.processes) > 0
+}
+
+// HasActiveStreaming returns true if there are currently active streaming sessions
+func (e *Executor) HasActiveStreaming() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.streamingActive) > 0
+}
+
+// DetachFromStreaming cancels all active streaming sessions while keeping processes running
+func (e *Executor) DetachFromStreaming() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	if len(e.streamingActive) == 0 {
+		return
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [seqr] [streaming] Detaching from %d active streaming session(s)...\n", timestamp, len(e.streamingActive))
+		os.Stdout.Sync()
+	}
+
+	// Cancel all active streaming sessions
+	for name, cancelFunc := range e.streamingActive {
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [streaming] Detaching from output streaming (process continues in background)\n", timestamp, name)
+		}
+		cancelFunc()
+	}
+
+	// Clear the tracking map
+	e.streamingActive = make(map[string]context.CancelFunc)
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [seqr] [streaming] Detached from all streaming sessions. Processes continue running in background.\n", timestamp)
+		fmt.Printf("[%s] [seqr] [streaming] Use 'seqr --kill' to terminate background processes when needed.\n", timestamp)
+		os.Stdout.Sync()
+	}
+}
+
+// GetActiveStreamingProcesses returns the names of processes with active streaming
+func (e *Executor) GetActiveStreamingProcesses() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	names := make([]string, 0, len(e.streamingActive))
+	for name := range e.streamingActive {
+		names = append(names, name)
+	}
+	return names
 }
 
 // terminateProcessGracefully attempts to terminate a process gracefully with SIGTERM before falling back to SIGKILL

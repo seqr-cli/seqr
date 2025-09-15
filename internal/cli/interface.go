@@ -37,6 +37,10 @@ type Interface interface {
 	// Stop gracefully stops the CLI execution
 	Stop()
 
+	// TryDetachFromStreaming attempts to detach from active streaming sessions
+	// Returns true if detachment was successful, false if no streaming was active
+	TryDetachFromStreaming() bool
+
 	// GetOptions returns the parsed CLI options
 	GetOptions() CLIOptions
 }
