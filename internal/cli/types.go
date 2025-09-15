@@ -17,6 +17,7 @@ type CLIOptions struct {
 	Verbose    bool   // Enable verbose output
 	Help       bool   // Show help message
 	Version    bool   // Show version information
+	Init       bool   // Generate example queue configuration files
 }
 
 // CLI represents the command-line interface
@@ -40,6 +41,7 @@ func NewCLI(args []string) *CLI {
 			Verbose:    false,
 			Help:       false,
 			Version:    false,
+			Init:       false,
 		},
 		flagSet: flagSet,
 		args:    args,
@@ -63,6 +65,8 @@ func (c *CLI) setupFlags() {
 		"Show help message")
 	c.flagSet.BoolVar(&c.options.Version, "version", c.options.Version,
 		"Show version information")
+	c.flagSet.BoolVar(&c.options.Init, "init", c.options.Init,
+		"Generate example queue configuration files")
 }
 
 // Parse parses command-line arguments and validates options
@@ -76,8 +80,8 @@ func (c *CLI) Parse() error {
 
 // validateOptions validates the parsed command-line options
 func (c *CLI) validateOptions() error {
-	// If help or version is requested, no validation needed
-	if c.options.Help || c.options.Version {
+	// If help, version, or init is requested, no validation needed
+	if c.options.Help || c.options.Version || c.options.Init {
 		return nil
 	}
 
@@ -103,6 +107,11 @@ func (c *CLI) ShouldShowVersion() bool {
 	return c.options.Version
 }
 
+// ShouldRunInit returns true if init should be executed
+func (c *CLI) ShouldRunInit() bool {
+	return c.options.Init
+}
+
 // ShowVersion displays version information
 func (c *CLI) ShowVersion(version string) {
 	fmt.Fprintf(os.Stdout, "seqr version %s\n", version)
@@ -123,7 +132,8 @@ func (c *CLI) ShowHelp() {
 	fmt.Fprintf(os.Stdout, "  seqr -f my-queue.json     # Run commands from custom file\n")
 	fmt.Fprintf(os.Stdout, "  seqr -v                   # Run with verbose output\n")
 	fmt.Fprintf(os.Stdout, "  seqr --verbose            # Run with verbose output (long form)\n")
-	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v     # Custom file with verbose output\n\n")
+	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v     # Custom file with verbose output\n")
+	fmt.Fprintf(os.Stdout, "  seqr --init               # Generate example configuration files\n\n")
 	fmt.Fprintf(os.Stdout, "CONFIGURATION:\n")
 	fmt.Fprintf(os.Stdout, "  The queue file should be a JSON file with the following structure:\n")
 	fmt.Fprintf(os.Stdout, "  {\n")
@@ -181,6 +191,15 @@ func (c *CLI) Run(ctx context.Context) error {
 		// All commands completed
 	}
 
+	return nil
+}
+
+// RunInit generates example configuration files
+func (c *CLI) RunInit() error {
+	// This is a placeholder implementation for task 3.1
+	// The actual template generation will be implemented in task 3.2
+	fmt.Fprintf(os.Stdout, "Init functionality will be implemented in the next task.\n")
+	fmt.Fprintf(os.Stdout, "This will generate example .queue.json files with different configuration formats.\n")
 	return nil
 }
 

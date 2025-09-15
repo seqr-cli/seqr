@@ -129,7 +129,7 @@ Command Output → [Output Capture] → Live Stream + Verbose Log
 **How:** Predefined templates that demonstrate different configuration formats
 
 ### Tasks
-- [ ] **3.1** Add --init flag to CLI interface
+- [x] **3.1** Add --init flag to CLI interface
 - [ ] **3.2** Create example templates for different configuration formats
 - [ ] **3.3** Implement template generation with helpful comments
 - [ ] **3.4** Handle existing file conflicts with user prompts

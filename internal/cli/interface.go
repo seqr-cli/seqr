@@ -19,6 +19,12 @@ type Interface interface {
 	// ShowVersion displays version information
 	ShowVersion(version string)
 
+	// ShouldRunInit returns true if init should be executed
+	ShouldRunInit() bool
+
+	// RunInit generates example configuration files
+	RunInit() error
+
 	// Run executes the CLI application with the parsed options
 	Run(ctx context.Context) error
 
