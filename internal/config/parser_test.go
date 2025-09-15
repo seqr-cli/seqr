@@ -175,7 +175,7 @@ func TestParseJSON(t *testing.T) {
 				]
 			}`,
 			wantErr:     true,
-			errorSubstr: "command string cannot be empty",
+			errorSubstr: "format detection failed",
 		},
 		{
 			name: "empty command array",
@@ -190,7 +190,7 @@ func TestParseJSON(t *testing.T) {
 				]
 			}`,
 			wantErr:     true,
-			errorSubstr: "command array cannot be empty",
+			errorSubstr: "format detection failed",
 		},
 		{
 			name: "invalid array element type",
@@ -205,7 +205,7 @@ func TestParseJSON(t *testing.T) {
 				]
 			}`,
 			wantErr:     true,
-			errorSubstr: "command array elements must be strings",
+			errorSubstr: "format detection failed",
 		},
 		{
 			name: "object without command field",
@@ -222,7 +222,7 @@ func TestParseJSON(t *testing.T) {
 				]
 			}`,
 			wantErr:     true,
-			errorSubstr: "object format must have a 'command' field",
+			errorSubstr: "format detection failed",
 		},
 		{
 			name: "invalid JSON syntax",
@@ -231,7 +231,7 @@ func TestParseJSON(t *testing.T) {
 				"commands": []
 			}`,
 			wantErr:     true,
-			errorSubstr: "JSON syntax error",
+			errorSubstr: "format detection failed",
 		},
 		{
 			name: "missing version",
@@ -245,7 +245,7 @@ func TestParseJSON(t *testing.T) {
 				]
 			}`,
 			wantErr:     true,
-			errorSubstr: "validation failed",
+			errorSubstr: "invalid configuration format detected",
 		},
 		{
 			name: "invalid mode",
@@ -269,7 +269,7 @@ func TestParseJSON(t *testing.T) {
 				"commands": []
 			}`,
 			wantErr:     true,
-			errorSubstr: "type error",
+			errorSubstr: "invalid configuration format detected",
 		},
 		{
 			name:        "empty data",
@@ -364,7 +364,7 @@ func TestLoadFromFile(t *testing.T) {
 			name:        "invalid config file",
 			filename:    invalidFile,
 			wantErr:     true,
-			errorSubstr: "JSON syntax error",
+			errorSubstr: "format detection failed",
 		},
 		{
 			name:        "non-existent file",
@@ -724,6 +724,141 @@ func TestFlexibleCommandToStandardCommand(t *testing.T) {
 					t.Error("ToStandardCommand() returned nil command without error")
 				} else if tt.validate != nil {
 					tt.validate(t, cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestParseJSONWithFormatInfo(t *testing.T) {
+	tests := []struct {
+		name        string
+		json        string
+		wantErr     bool
+		errorSubstr string
+		validate    func(*testing.T, *Config, *ConfigFormatInfo)
+	}{
+		{
+			name: "mixed formats with format info",
+			json: `{
+				"version": "1.0",
+				"commands": [
+					{
+						"name": "string-cmd",
+						"command": "npm start",
+						"mode": "once"
+					},
+					{
+						"name": "array-cmd",
+						"command": ["node", "server.js"],
+						"mode": "keepAlive"
+					},
+					{
+						"name": "object-cmd",
+						"command": {
+							"command": "docker",
+							"args": ["run", "nginx"]
+						},
+						"mode": "keepAlive"
+					}
+				]
+			}`,
+			wantErr: false,
+			validate: func(t *testing.T, config *Config, formatInfo *ConfigFormatInfo) {
+				if len(config.Commands) != 3 {
+					t.Errorf("Expected 3 commands, got %d", len(config.Commands))
+				}
+				if !formatInfo.MixedFormats {
+					t.Error("Expected mixed formats to be true")
+				}
+				if len(formatInfo.CommandFormats) != 3 {
+					t.Errorf("Expected 3 command format infos, got %d", len(formatInfo.CommandFormats))
+				}
+
+				expectedFormats := []CommandFormat{FormatString, FormatArray, FormatObject}
+				for i, expected := range expectedFormats {
+					if formatInfo.CommandFormats[i].Format != expected {
+						t.Errorf("Command %d: expected format %s, got %s",
+							i, expected.String(), formatInfo.CommandFormats[i].Format.String())
+					}
+				}
+			},
+		},
+		{
+			name: "single format with format info",
+			json: `{
+				"version": "1.0",
+				"commands": [
+					{
+						"name": "cmd1",
+						"command": "npm start",
+						"mode": "once"
+					},
+					{
+						"name": "cmd2",
+						"command": "npm build",
+						"mode": "once"
+					}
+				]
+			}`,
+			wantErr: false,
+			validate: func(t *testing.T, config *Config, formatInfo *ConfigFormatInfo) {
+				if formatInfo.MixedFormats {
+					t.Error("Expected mixed formats to be false")
+				}
+				summary := formatInfo.GetFormatSummary()
+				if summary["string"] != 2 {
+					t.Errorf("Expected 2 string commands, got %d", summary["string"])
+				}
+			},
+		},
+		{
+			name: "invalid format detection",
+			json: `{
+				"version": "1.0",
+				"commands": [
+					{
+						"name": "invalid",
+						"command": 123,
+						"mode": "once"
+					}
+				]
+			}`,
+			wantErr:     true,
+			errorSubstr: "format detection failed",
+		},
+		{
+			name:        "empty data",
+			json:        "",
+			wantErr:     true,
+			errorSubstr: "configuration data is empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config, formatInfo, err := ParseJSONWithFormatInfo([]byte(tt.json))
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseJSONWithFormatInfo() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && tt.errorSubstr != "" {
+				if err == nil || !contains(err.Error(), tt.errorSubstr) {
+					t.Errorf("ParseJSONWithFormatInfo() error = %v, expected to contain %q", err, tt.errorSubstr)
+				}
+			}
+
+			if !tt.wantErr {
+				if config == nil {
+					t.Error("ParseJSONWithFormatInfo() returned nil config without error")
+				}
+				if formatInfo == nil {
+					t.Error("ParseJSONWithFormatInfo() returned nil formatInfo without error")
+				}
+				if tt.validate != nil {
+					tt.validate(t, config, formatInfo)
 				}
 			}
 		})

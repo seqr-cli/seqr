@@ -59,6 +59,17 @@ func ParseJSON(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("configuration data is empty")
 	}
 
+	// First, detect and validate formats before parsing
+	detector := NewFormatDetector()
+	formatInfo, err := detector.DetectConfigFormat(data)
+	if err != nil {
+		return nil, fmt.Errorf("format detection failed: %w", err)
+	}
+
+	if !formatInfo.IsValid() {
+		return nil, fmt.Errorf("invalid configuration format detected")
+	}
+
 	var config Config
 
 	if err := json.Unmarshal(data, &config); err != nil {
@@ -78,6 +89,44 @@ func ParseJSON(data []byte) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+// ParseJSONWithFormatInfo parses JSON data and returns both the config and format information
+func ParseJSONWithFormatInfo(data []byte) (*Config, *ConfigFormatInfo, error) {
+	if len(data) == 0 {
+		return nil, nil, fmt.Errorf("configuration data is empty")
+	}
+
+	// Detect and validate formats
+	detector := NewFormatDetector()
+	formatInfo, err := detector.DetectConfigFormat(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("format detection failed: %w", err)
+	}
+
+	if !formatInfo.IsValid() {
+		return nil, nil, fmt.Errorf("invalid configuration format detected")
+	}
+
+	var config Config
+
+	if err := json.Unmarshal(data, &config); err != nil {
+		switch err := err.(type) {
+		case *json.SyntaxError:
+			return nil, nil, fmt.Errorf("JSON syntax error at byte offset %d: %w", err.Offset, err)
+		case *json.UnmarshalTypeError:
+			return nil, nil, fmt.Errorf("JSON type error: cannot unmarshal %s into field '%s' of type %s",
+				err.Value, err.Field, err.Type)
+		default:
+			return nil, nil, fmt.Errorf("failed to parse JSON: %w", err)
+		}
+	}
+
+	if err := config.Validate(); err != nil {
+		return nil, nil, fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	return &config, formatInfo, nil
 }
 
 func DefaultConfigFile() string {
