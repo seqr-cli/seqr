@@ -7,8 +7,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/seqr-cli/seqr/internal/config"
@@ -487,9 +489,9 @@ func (e *Executor) Stop() {
 		if cmd.Process != nil {
 			if e.verbose {
 				timestamp := time.Now().Format("15:04:05.000")
-				fmt.Printf("[%s] [%s] [process] Terminating process (PID %d)\n", timestamp, name, cmd.Process.Pid)
+				fmt.Printf("[%s] [%s] [process] Gracefully terminating process (PID %d)\n", timestamp, name, cmd.Process.Pid)
 			}
-			cmd.Process.Kill()
+			e.terminateProcessGracefully(cmd.Process, name)
 		}
 	}
 
@@ -547,4 +549,78 @@ func (e *Executor) CleanupDeadProcesses() error {
 // GetTrackedProcessCount returns the number of currently tracked processes
 func (e *Executor) GetTrackedProcessCount() int {
 	return e.tracker.GetRunningProcessCount()
+}
+
+// HasActiveKeepAliveProcesses returns true if there are currently running keepAlive processes
+func (e *Executor) HasActiveKeepAliveProcesses() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return len(e.processes) > 0
+}
+
+// terminateProcessGracefully attempts to terminate a process gracefully with SIGTERM before falling back to SIGKILL
+func (e *Executor) terminateProcessGracefully(process *os.Process, name string) {
+	if runtime.GOOS == "windows" {
+		// On Windows, we don't have SIGTERM, so we'll just force kill
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Windows detected, using force termination (PID %d)\n", timestamp, name, process.Pid)
+		}
+		process.Kill()
+		return
+	}
+
+	// Send SIGTERM for graceful shutdown on Unix-like systems
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Failed to send SIGTERM (PID %d): %v, using force kill\n", timestamp, name, process.Pid, err)
+		}
+		process.Kill()
+		return
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [%s] [process] Sent SIGTERM (PID %d), waiting for graceful shutdown...\n", timestamp, name, process.Pid)
+	}
+
+	// Wait up to 5 seconds for graceful shutdown
+	done := make(chan error, 1)
+	go func() {
+		_, err := process.Wait()
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		// Process exited gracefully
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			if err != nil {
+				fmt.Printf("[%s] [%s] [process] Process exited gracefully with error (PID %d): %v\n", timestamp, name, process.Pid, err)
+			} else {
+				fmt.Printf("[%s] [%s] [process] Process exited gracefully (PID %d)\n", timestamp, name, process.Pid)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		// Timeout, force kill
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Graceful shutdown timeout (PID %d), using force kill\n", timestamp, name, process.Pid)
+		}
+		process.Kill()
+
+		// Wait a bit more for the force kill to complete
+		select {
+		case <-done:
+			// Process finally exited
+		case <-time.After(2 * time.Second):
+			// Even force kill timed out, log warning
+			if e.verbose {
+				timestamp := time.Now().Format("15:04:05.000")
+				fmt.Printf("[%s] [%s] [process] Warning: Force kill timeout (PID %d)\n", timestamp, name, process.Pid)
+			}
+		}
+	}
 }

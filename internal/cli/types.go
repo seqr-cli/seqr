@@ -190,15 +190,20 @@ func (c *CLI) Run(ctx context.Context) error {
 		return fmt.Errorf("execution failed: %w", err)
 	}
 
-	// Wait for context cancellation if there might be keepAlive processes
-	select {
-	case <-ctx.Done():
+	// Check if there are any active keepAlive processes running
+	if c.executor.HasActiveKeepAliveProcesses() {
+		if c.options.Verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [seqr] [system] KeepAlive processes running, waiting for termination signal...\n", timestamp)
+		}
+
+		// Wait for context cancellation when there are keepAlive processes
+		<-ctx.Done()
+
 		if c.options.Verbose {
 			timestamp := time.Now().Format("15:04:05.000")
 			fmt.Printf("[%s] [seqr] [system] Received termination signal, shutting down...\n", timestamp)
 		}
-	default:
-		// All commands completed
 	}
 
 	return nil
