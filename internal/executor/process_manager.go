@@ -91,9 +91,63 @@ func (pm *ProcessManager) KillAllProcesses(graceful bool) error {
 
 // terminateGracefully attempts to terminate a process gracefully with SIGTERM
 func (pm *ProcessManager) terminateGracefully(process *os.Process, info *ProcessInfo) error {
+	// Try to kill the entire process group first
+	if err := pm.killProcessGroup(process.Pid, true); err != nil {
+		// Fall back to single process termination
+		return pm.terminateGracefullyFallback(process, info)
+	}
+
+	// Wait up to 10 seconds for graceful shutdown
+	done := make(chan error, 1)
+	go func() {
+		_, err := process.Wait()
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		// Process exited gracefully
+		return err
+	case <-time.After(10 * time.Second):
+		// Timeout, force kill the process group
+		return pm.forceKillProcessGroup(process, info)
+	}
+}
+
+// forceKill forcefully terminates a process with SIGKILL
+func (pm *ProcessManager) forceKill(process *os.Process, info *ProcessInfo) error {
+	// Try to force kill the entire process group first
+	if err := pm.killProcessGroup(process.Pid, false); err != nil {
+		// Fall back to single process force kill
+		return pm.forceKillFallback(process, info)
+	}
+
+	// Wait for process to exit (should be immediate with force kill)
+	_, err := process.Wait()
+	return err
+}
+
+// GetProcessCount returns the number of currently tracked processes
+func (pm *ProcessManager) GetProcessCount() (int, error) {
+	// Clean up dead processes first
+	if err := pm.tracker.CleanupDeadProcesses(); err != nil {
+		return 0, fmt.Errorf("failed to cleanup dead processes: %w", err)
+	}
+
+	return pm.tracker.GetRunningProcessCount(), nil
+}
+
+// killProcessGroup kills an entire process group using platform-specific methods
+func (pm *ProcessManager) killProcessGroup(pid int, graceful bool) error {
+	// The actual implementation is in platform-specific files
+	return pm.killProcessGroupPlatform(pid, graceful)
+}
+
+// terminateGracefullyFallback falls back to single process termination when process group termination fails
+func (pm *ProcessManager) terminateGracefullyFallback(process *os.Process, info *ProcessInfo) error {
 	if runtime.GOOS == "windows" {
 		// On Windows, we don't have SIGTERM, so we'll just force kill
-		return pm.forceKill(process, info)
+		return pm.forceKillFallback(process, info)
 	}
 
 	// Send SIGTERM for graceful shutdown on Unix-like systems
@@ -114,12 +168,12 @@ func (pm *ProcessManager) terminateGracefully(process *os.Process, info *Process
 		return err
 	case <-time.After(10 * time.Second):
 		// Timeout, force kill
-		return pm.forceKill(process, info)
+		return pm.forceKillFallback(process, info)
 	}
 }
 
-// forceKill forcefully terminates a process with SIGKILL
-func (pm *ProcessManager) forceKill(process *os.Process, info *ProcessInfo) error {
+// forceKillFallback forcefully terminates a single process with SIGKILL
+func (pm *ProcessManager) forceKillFallback(process *os.Process, info *ProcessInfo) error {
 	// Send SIGKILL for immediate termination
 	if err := process.Kill(); err != nil {
 		return fmt.Errorf("failed to send SIGKILL: %w", err)
@@ -130,12 +184,15 @@ func (pm *ProcessManager) forceKill(process *os.Process, info *ProcessInfo) erro
 	return err
 }
 
-// GetProcessCount returns the number of currently tracked processes
-func (pm *ProcessManager) GetProcessCount() (int, error) {
-	// Clean up dead processes first
-	if err := pm.tracker.CleanupDeadProcesses(); err != nil {
-		return 0, fmt.Errorf("failed to cleanup dead processes: %w", err)
+// forceKillProcessGroup forcefully terminates a process group
+func (pm *ProcessManager) forceKillProcessGroup(process *os.Process, info *ProcessInfo) error {
+	// Try to force kill the entire process group first
+	if err := pm.killProcessGroup(process.Pid, false); err != nil {
+		// Fall back to single process force kill
+		return pm.forceKillFallback(process, info)
 	}
 
-	return pm.tracker.GetRunningProcessCount(), nil
+	// Wait for process to exit (should be immediate with force kill)
+	_, err := process.Wait()
+	return err
 }

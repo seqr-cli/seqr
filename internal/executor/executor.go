@@ -107,6 +107,9 @@ func (e *Executor) executeCommand(ctx context.Context, cmd config.Command) (Exec
 		}
 	}
 
+	// Configure process group for proper child process cleanup
+	e.configureProcessGroup(execCmd)
+
 	switch cmd.Mode {
 	case config.ModeOnce:
 		return e.executeOnce(execCmd, result)
@@ -560,29 +563,20 @@ func (e *Executor) HasActiveKeepAliveProcesses() bool {
 
 // terminateProcessGracefully attempts to terminate a process gracefully with SIGTERM before falling back to SIGKILL
 func (e *Executor) terminateProcessGracefully(process *os.Process, name string) {
-	if runtime.GOOS == "windows" {
-		// On Windows, we don't have SIGTERM, so we'll just force kill
-		if e.verbose {
-			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [%s] [process] Windows detected, using force termination (PID %d)\n", timestamp, name, process.Pid)
-		}
-		e.forceKillProcess(process, name)
-		return
-	}
-
-	// Send SIGTERM for graceful shutdown on Unix-like systems
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		if e.verbose {
-			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [%s] [process] Failed to send SIGTERM (PID %d): %v, using force kill\n", timestamp, name, process.Pid, err)
-		}
-		e.forceKillProcess(process, name)
-		return
-	}
-
 	if e.verbose {
 		timestamp := time.Now().Format("15:04:05.000")
-		fmt.Printf("[%s] [%s] [process] Sent SIGTERM (PID %d), waiting for graceful shutdown...\n", timestamp, name, process.Pid)
+		fmt.Printf("[%s] [%s] [process] Terminating process group (PID %d) gracefully...\n", timestamp, name, process.Pid)
+	}
+
+	// Try to kill the entire process group first
+	if err := e.killProcessGroup(process.Pid, true); err != nil {
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Failed to terminate process group (PID %d): %v, falling back to single process termination\n", timestamp, name, process.Pid, err)
+		}
+		// Fall back to single process termination
+		e.terminateProcessGracefullyFallback(process, name)
+		return
 	}
 
 	// Wait up to 5 seconds for graceful shutdown
@@ -598,18 +592,18 @@ func (e *Executor) terminateProcessGracefully(process *os.Process, name string) 
 		if e.verbose {
 			timestamp := time.Now().Format("15:04:05.000")
 			if err != nil {
-				fmt.Printf("[%s] [%s] [process] Process exited gracefully with error (PID %d): %v\n", timestamp, name, process.Pid, err)
+				fmt.Printf("[%s] [%s] [process] Process group exited gracefully with error (PID %d): %v\n", timestamp, name, process.Pid, err)
 			} else {
-				fmt.Printf("[%s] [%s] [process] Process exited gracefully (PID %d)\n", timestamp, name, process.Pid)
+				fmt.Printf("[%s] [%s] [process] Process group exited gracefully (PID %d)\n", timestamp, name, process.Pid)
 			}
 		}
 	case <-time.After(5 * time.Second):
 		// Timeout, force kill with SIGKILL
 		if e.verbose {
 			timestamp := time.Now().Format("15:04:05.000")
-			fmt.Printf("[%s] [%s] [process] Graceful shutdown timeout (PID %d), using force kill with SIGKILL\n", timestamp, name, process.Pid)
+			fmt.Printf("[%s] [%s] [process] Graceful shutdown timeout (PID %d), using force kill on process group\n", timestamp, name, process.Pid)
 		}
-		e.forceKillProcessWithTimeout(process, name, done)
+		e.forceKillProcessGroupWithTimeout(process, name, done)
 	}
 }
 
@@ -686,6 +680,112 @@ func (e *Executor) forceKillProcessWithTimeout(process *os.Process, name string,
 		if e.verbose {
 			timestamp := time.Now().Format("15:04:05.000")
 			fmt.Printf("[%s] [%s] [process] Warning: SIGKILL timeout (PID %d) - process may be in uninterruptible state\n", timestamp, name, process.Pid)
+		}
+	}
+}
+
+// configureProcessGroup sets up process group for proper child process cleanup
+func (e *Executor) configureProcessGroup(cmd *exec.Cmd) {
+	// The actual implementation is in platform-specific files
+	e.configureProcessGroupPlatform(cmd)
+}
+
+// killProcessGroup kills an entire process group using platform-specific methods
+func (e *Executor) killProcessGroup(pid int, graceful bool) error {
+	// The actual implementation is in platform-specific files
+	return e.killProcessGroupPlatform(pid, graceful)
+}
+
+// terminateProcessGracefullyFallback falls back to single process termination when process group termination fails
+func (e *Executor) terminateProcessGracefullyFallback(process *os.Process, name string) {
+	if runtime.GOOS == "windows" {
+		// On Windows, we don't have SIGTERM, so we'll just force kill
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Windows detected, using force termination (PID %d)\n", timestamp, name, process.Pid)
+		}
+		e.forceKillProcess(process, name)
+		return
+	}
+
+	// Send SIGTERM for graceful shutdown on Unix-like systems
+	if err := process.Signal(syscall.SIGTERM); err != nil {
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Failed to send SIGTERM (PID %d): %v, using force kill\n", timestamp, name, process.Pid, err)
+		}
+		e.forceKillProcess(process, name)
+		return
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [%s] [process] Sent SIGTERM (PID %d), waiting for graceful shutdown...\n", timestamp, name, process.Pid)
+	}
+
+	// Wait up to 5 seconds for graceful shutdown
+	done := make(chan error, 1)
+	go func() {
+		_, err := process.Wait()
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		// Process exited gracefully
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			if err != nil {
+				fmt.Printf("[%s] [%s] [process] Process exited gracefully with error (PID %d): %v\n", timestamp, name, process.Pid, err)
+			} else {
+				fmt.Printf("[%s] [%s] [process] Process exited gracefully (PID %d)\n", timestamp, name, process.Pid)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		// Timeout, force kill with SIGKILL
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Graceful shutdown timeout (PID %d), using force kill with SIGKILL\n", timestamp, name, process.Pid)
+		}
+		e.forceKillProcessWithTimeout(process, name, done)
+	}
+}
+
+// forceKillProcessGroupWithTimeout sends force kill signal to process group and waits for termination with timeout
+func (e *Executor) forceKillProcessGroupWithTimeout(process *os.Process, name string, gracefulDone chan error) {
+	// Try to force kill the entire process group
+	if err := e.killProcessGroup(process.Pid, false); err != nil {
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Failed to force kill process group (PID %d): %v, falling back to single process kill\n", timestamp, name, process.Pid, err)
+		}
+		// Fall back to single process force kill
+		e.forceKillProcessWithTimeout(process, name, gracefulDone)
+		return
+	}
+
+	if e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [%s] [process] Sent force kill to process group (PID %d), waiting for termination...\n", timestamp, name, process.Pid)
+	}
+
+	// Wait for either the graceful wait to complete or force kill to take effect
+	select {
+	case err := <-gracefulDone:
+		// Process finally exited (either from graceful or force kill)
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			if err != nil {
+				fmt.Printf("[%s] [%s] [process] Process group terminated after force kill (PID %d): %v\n", timestamp, name, process.Pid, err)
+			} else {
+				fmt.Printf("[%s] [%s] [process] Process group terminated after force kill (PID %d)\n", timestamp, name, process.Pid)
+			}
+		}
+	case <-time.After(3 * time.Second):
+		// Even force kill timed out, log warning
+		if e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Warning: Force kill timeout on process group (PID %d) - processes may be in uninterruptible state\n", timestamp, name, process.Pid)
 		}
 	}
 }
