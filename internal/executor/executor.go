@@ -374,7 +374,8 @@ func (e *Executor) Stop() {
 	for name, cmd := range e.processes {
 		if cmd.Process != nil {
 			if e.verbose {
-				fmt.Printf("Terminating process '%s' (PID %d)\n", name, cmd.Process.Pid)
+				timestamp := time.Now().Format("15:04:05.000")
+				fmt.Printf("[%s] [%s] [process] Terminating process (PID %d)\n", timestamp, name, cmd.Process.Pid)
 			}
 			cmd.Process.Kill()
 		}

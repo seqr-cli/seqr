@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/seqr-cli/seqr/internal/config"
 	"github.com/seqr-cli/seqr/internal/executor"
@@ -173,7 +174,8 @@ func (c *CLI) Run(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		if c.options.Verbose {
-			fmt.Println("Received termination signal, shutting down...")
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [seqr] [system] Received termination signal, shutting down...\n", timestamp)
 		}
 	default:
 		// All commands completed
