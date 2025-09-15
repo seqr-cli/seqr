@@ -43,6 +43,7 @@ func TestCLI_Parse(t *testing.T) {
 				ConfigFile: ".queue.json",
 				Verbose:    false,
 				Help:       false,
+				Init:       false,
 			},
 		},
 		{
@@ -53,6 +54,18 @@ func TestCLI_Parse(t *testing.T) {
 				ConfigFile: ".queue.json",
 				Verbose:    true,
 				Help:       false,
+				Init:       false,
+			},
+		},
+		{
+			name:        "verbose flag long form",
+			args:        []string{"-verbose"},
+			expectError: false,
+			expectedOpts: CLIOptions{
+				ConfigFile: ".queue.json",
+				Verbose:    true,
+				Help:       false,
+				Init:       false,
 			},
 		},
 		{
@@ -63,6 +76,7 @@ func TestCLI_Parse(t *testing.T) {
 				ConfigFile: "custom.json",
 				Verbose:    false,
 				Help:       false,
+				Init:       false,
 			},
 		},
 		{
@@ -73,6 +87,7 @@ func TestCLI_Parse(t *testing.T) {
 				ConfigFile: ".queue.json",
 				Verbose:    false,
 				Help:       true,
+				Init:       false,
 			},
 		},
 		{
@@ -83,6 +98,7 @@ func TestCLI_Parse(t *testing.T) {
 				ConfigFile: ".queue.json",
 				Verbose:    false,
 				Help:       true,
+				Init:       false,
 			},
 		},
 		{
@@ -93,6 +109,18 @@ func TestCLI_Parse(t *testing.T) {
 				ConfigFile: "test.json",
 				Verbose:    true,
 				Help:       false,
+				Init:       false,
+			},
+		},
+		{
+			name:        "init flag",
+			args:        []string{"-init"},
+			expectError: false,
+			expectedOpts: CLIOptions{
+				ConfigFile: ".queue.json",
+				Verbose:    false,
+				Help:       false,
+				Init:       true,
 			},
 		},
 	}
@@ -118,6 +146,36 @@ func TestCLI_Parse(t *testing.T) {
 			}
 			if opts.Help != tt.expectedOpts.Help {
 				t.Errorf("Expected Help %t, got %t", tt.expectedOpts.Help, opts.Help)
+			}
+		})
+	}
+}
+
+func TestCLI_ShouldRunInit(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		expected bool
+	}{
+		{
+			name:     "no init flag",
+			args:     []string{},
+			expected: false,
+		},
+		{
+			name:     "init flag",
+			args:     []string{"-init"},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cli := NewCLI(tt.args)
+			cli.Parse() // Ignore error for init tests
+
+			if cli.ShouldRunInit() != tt.expected {
+				t.Errorf("Expected ShouldRunInit() to return %t, got %t", tt.expected, cli.ShouldRunInit())
 			}
 		})
 	}
@@ -312,6 +370,15 @@ func TestCLI_FlagCombinations(t *testing.T) {
 				ConfigFile: ".queue.json",
 				Verbose:    true,
 				Help:       true,
+			},
+		},
+		{
+			name: "long verbose flag with config file",
+			args: []string{"-f", "test.json", "-verbose"},
+			expectedOpts: CLIOptions{
+				ConfigFile: "test.json",
+				Verbose:    true,
+				Help:       false,
 			},
 		},
 	}

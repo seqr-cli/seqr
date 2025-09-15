@@ -23,7 +23,8 @@
         "8001"
       ],
       "mode": "keepAlive",
-      "workDir": "./services/user"
+      "workDir": "./services/user",
+      "concurrent": true
     },
     {
       "name": "start-order-service",
@@ -33,7 +34,8 @@
         "8002"
       ],
       "mode": "keepAlive",
-      "workDir": "./services/order"
+      "workDir": "./services/order",
+      "concurrent": true
     },
     {
       "name": "start-gateway",

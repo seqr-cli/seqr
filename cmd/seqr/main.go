@@ -34,6 +34,30 @@ func main() {
 		os.Exit(0)
 	}
 
+	if cliApp.ShouldRunInit() {
+		if err := cliApp.RunInit(); err != nil {
+			os.Stderr.WriteString("Error: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	if cliApp.ShouldRunKill() {
+		if err := cliApp.RunKill(); err != nil {
+			os.Stderr.WriteString("Error: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	if cliApp.ShouldRunStatus() {
+		if err := cliApp.RunStatus(); err != nil {
+			os.Stderr.WriteString("Error: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -41,9 +65,29 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		<-sigChan
-		cancel()
-		cliApp.Stop()
+		signalCount := 0
+		for {
+			<-sigChan
+			signalCount++
+
+			if signalCount == 1 {
+				// First signal: try to detach from streaming if active
+				if cliApp.TryDetachFromStreaming() {
+					// Successfully detached from streaming, continue running
+					continue
+				} else {
+					// No active streaming or detachment failed, proceed with normal shutdown
+					cancel()
+					cliApp.Stop()
+					return
+				}
+			} else {
+				// Second signal: force shutdown
+				cancel()
+				cliApp.Stop()
+				return
+			}
+		}
 	}()
 	if err := cliApp.Run(ctx); err != nil {
 		os.Stderr.WriteString("Error: " + err.Error() + "\n")

@@ -1,0 +1,156 @@
+{
+  "_after_setup": {
+    "backend_url": "http://localhost:3001",
+    "database": "postgresql://postgres:devpass@localhost:5432/fullstack_app",
+    "frontend_url": "Check console output for frontend dev server URL (usually http://localhost:3000 or http://localhost:5173)",
+    "redis": "redis://localhost:6379"
+  },
+  "_architecture": {
+    "backend": "Node.js API server running on port 3001",
+    "cache": "Redis running in Docker container on port 6379",
+    "database": "PostgreSQL running in Docker container on port 5432",
+    "frontend": "Frontend development server (e.g., Vite, Create React App) with API proxy"
+  },
+  "_comment": "Full-Stack Development Example - Complete development environment setup",
+  "_description": "This template sets up a complete full-stack development environment with database, cache, backend API, and frontend application",
+  "_execution_summary": [
+    "Steps 1-2: Start infrastructure services (database, cache)",
+    "Step 3: Wait for services to be ready",
+    "Steps 4-5: Install dependencies for both backend and frontend",
+    "Step 6: Set up database schema",
+    "Steps 7-8: Start both backend and frontend servers"
+  ],
+  "_prerequisites": [
+    "Docker installed and running",
+    "Node.js and npm installed",
+    "Backend code in ./backend directory with package.json",
+    "Frontend code in ./frontend directory with package.json"
+  ],
+  "_troubleshooting": {
+    "dependency_issues": [
+      "Ensure package.json files exist in ./backend and ./frontend directories",
+      "Check that npm is installed and accessible"
+    ],
+    "docker_issues": [
+      "Ensure Docker is running before starting seqr",
+      "If containers fail to start, try 'docker system prune' to clean up"
+    ],
+    "port_conflicts": [
+      "If ports 5432, 6379, or 3001 are in use, stop existing services",
+      "Use 'docker ps' to see running containers",
+      "Use 'docker stop \u003ccontainer-name\u003e' to stop conflicting containers"
+    ]
+  },
+  "commands": [
+    {
+      "_comment": "Start PostgreSQL database container for persistent data storage",
+      "_explanation": "Creates PostgreSQL container with database 'fullstack_app' and password 'devpass'",
+      "_step": 1,
+      "command": [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        "dev-postgres",
+        "-p",
+        "5432:5432",
+        "postgres:13"
+      ],
+      "env": {
+        "POSTGRES_DB": "fullstack_app",
+        "POSTGRES_PASSWORD": "devpass"
+      },
+      "mode": "keepAlive",
+      "name": "setup-database"
+    },
+    {
+      "_comment": "Start Redis container for caching and session storage",
+      "_explanation": "Redis provides fast in-memory caching for the application",
+      "_step": 2,
+      "command": "docker run -d --name dev-redis -p 6379:6379 redis:alpine",
+      "mode": "keepAlive",
+      "name": "setup-redis"
+    },
+    {
+      "_comment": "Wait for database and Redis containers to be fully ready",
+      "_step": 3,
+      "_why_wait": "Services need time to initialize before accepting connections",
+      "command": [
+        "sleep",
+        "5"
+      ],
+      "mode": "once",
+      "name": "wait-for-services"
+    },
+    {
+      "_comment": "Install backend dependencies (package.json in ./backend)",
+      "_explanation": "Installs all npm packages required by the backend API",
+      "_step": 4,
+      "command": {
+        "args": [
+          "install"
+        ],
+        "command": "npm"
+      },
+      "mode": "once",
+      "name": "install-backend-deps",
+      "workDir": "./backend"
+    },
+    {
+      "_comment": "Install frontend dependencies (package.json in ./frontend)",
+      "_explanation": "Installs all npm packages required by the frontend application",
+      "_step": 5,
+      "command": "npm install",
+      "mode": "once",
+      "name": "install-frontend-deps",
+      "workDir": "./frontend"
+    },
+    {
+      "_comment": "Run database migrations to set up schema and initial data",
+      "_explanation": "Sets up database tables and initial data (requires db:migrate script in backend/package.json)",
+      "_step": 6,
+      "command": [
+        "npm",
+        "run",
+        "db:migrate"
+      ],
+      "mode": "once",
+      "name": "run-migrations",
+      "workDir": "./backend"
+    },
+    {
+      "_comment": "Start the backend API server in development mode",
+      "_explanation": "Starts backend server with connections to database and Redis",
+      "_step": 7,
+      "command": {
+        "args": [
+          "run",
+          "dev"
+        ],
+        "command": "npm"
+      },
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:devpass@localhost:5432/fullstack_app",
+        "NODE_ENV": "development",
+        "PORT": "3001",
+        "REDIS_URL": "redis://localhost:6379"
+      },
+      "mode": "keepAlive",
+      "name": "start-backend",
+      "workDir": "./backend"
+    },
+    {
+      "_comment": "Start the frontend development server with hot reload",
+      "_explanation": "Starts frontend dev server configured to proxy API requests to backend",
+      "_step": 8,
+      "command": "npm run dev",
+      "env": {
+        "VITE_API_URL": "http://localhost:3001"
+      },
+      "mode": "keepAlive",
+      "name": "start-frontend",
+      "workDir": "./frontend"
+    }
+  ],
+  "version": "1.0"
+}

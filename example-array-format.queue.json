@@ -1,0 +1,84 @@
+{
+  "_comment": "Array Format Example - Commands as arrays of strings (best for complex arguments)",
+  "_field_explanations": {
+    "command": "Array where first element is executable, rest are arguments",
+    "env": "Optional: Environment variables to set for the command",
+    "mode": "Execution mode: 'once' (wait for completion) or 'keepAlive' (run in background)",
+    "name": "Unique identifier for the command (used in logs and error messages)",
+    "workDir": "Optional: Directory to run command in (relative to queue file location)"
+  },
+  "_usage": {
+    "cons": [
+      "More verbose than string format",
+      "Requires splitting command from arguments manually"
+    ],
+    "description": "Array format splits command and arguments into separate array elements",
+    "examples": [
+      "[\"npm\", \"install\"] - Command with no arguments",
+      "[\"docker\", \"run\", \"-p\", \"3000:3000\", \"myapp\"] - Command with multiple flags",
+      "[\"echo\", \"Hello World\"] - Handles spaces without quotes"
+    ],
+    "pros": [
+      "No shell parsing issues - arguments are explicit",
+      "Handles spaces and special characters cleanly",
+      "More predictable than string format"
+    ]
+  },
+  "commands": [
+    {
+      "_comment": "Start Redis container - runs in background for the application",
+      "_note": "Each array element is a separate argument - no shell parsing needed",
+      "command": [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        "redis",
+        "-p",
+        "6379:6379",
+        "redis:alpine"
+      ],
+      "mode": "keepAlive",
+      "name": "setup-docker"
+    },
+    {
+      "_comment": "Wait for Redis to be ready before continuing",
+      "command": [
+        "sleep",
+        "2"
+      ],
+      "mode": "once",
+      "name": "wait-for-redis"
+    },
+    {
+      "_comment": "Run tests with coverage in backend directory",
+      "_workdir_note": "workDir changes the working directory for this command only",
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "--coverage"
+      ],
+      "mode": "once",
+      "name": "run-tests",
+      "workDir": "./backend"
+    },
+    {
+      "_comment": "Start the application server in background",
+      "_env_note": "Environment variables are available to the command process",
+      "command": [
+        "node",
+        "server.js",
+        "--port",
+        "8080"
+      ],
+      "env": {
+        "REDIS_URL": "redis://localhost:6379"
+      },
+      "mode": "keepAlive",
+      "name": "start-app",
+      "workDir": "./backend"
+    }
+  ],
+  "version": "1.0"
+}

@@ -3,6 +3,7 @@ package executor
 import (
 	"fmt"
 	"io"
+	"time"
 )
 
 type Reporter interface {
@@ -27,7 +28,8 @@ func NewConsoleReporter(writer io.Writer, verbose bool) *ConsoleReporter {
 
 func (r *ConsoleReporter) ReportStart(totalCommands int) {
 	if r.verbose {
-		fmt.Fprintf(r.writer, "Starting execution of %d commands\n", totalCommands)
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Fprintf(r.writer, "[%s] [seqr] [system] Starting execution of %d commands\n", timestamp, totalCommands)
 	}
 }
 
@@ -38,14 +40,16 @@ func (r *ConsoleReporter) ReportCommandStart(commandName string, commandIndex in
 func (r *ConsoleReporter) ReportCommandSuccess(result ExecutionResult, commandIndex int) {
 	fmt.Fprintf(r.writer, "[%d] ✓ %s (%v)\n", commandIndex+1, result.Command.Name, result.Duration.Round(10))
 	if r.verbose && result.Output != "" {
-		fmt.Fprintf(r.writer, "    Output: %s\n", result.Output)
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Fprintf(r.writer, "[%s] [%s] [summary] Output: %s\n", timestamp, result.Command.Name, result.Output)
 	}
 }
 
 func (r *ConsoleReporter) ReportCommandFailure(result ExecutionResult, commandIndex int) {
 	fmt.Fprintf(r.writer, "[%d] ✗ %s failed: %s\n", commandIndex+1, result.Command.Name, result.Error)
 	if r.verbose && result.Output != "" {
-		fmt.Fprintf(r.writer, "    Output: %s\n", result.Output)
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Fprintf(r.writer, "[%s] [%s] [summary] Output: %s\n", timestamp, result.Command.Name, result.Output)
 	}
 }
 
