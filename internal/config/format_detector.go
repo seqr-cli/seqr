@@ -183,14 +183,54 @@ func (fd *FormatDetector) validateObjectFormat(commandData interface{}) error {
 func (fd *FormatDetector) DetectAndValidateCommand(commandData interface{}) (CommandFormat, error) {
 	format, err := fd.DetectCommandFormat(commandData)
 	if err != nil {
-		return FormatUnknown, fmt.Errorf("format detection failed: %w", err)
+		return FormatUnknown, fd.enhanceFormatDetectionError(err, commandData)
 	}
 
 	if err := fd.ValidateCommandFormat(commandData, format); err != nil {
-		return format, fmt.Errorf("format validation failed: %w", err)
+		return format, fd.enhanceFormatValidationError(err, format, commandData)
 	}
 
 	return format, nil
+}
+
+// enhanceFormatDetectionError provides more helpful error messages for format detection failures
+func (fd *FormatDetector) enhanceFormatDetectionError(originalErr error, commandData interface{}) error {
+	baseMsg := fmt.Sprintf("format detection failed: %v", originalErr)
+
+	switch commandData.(type) {
+	case nil:
+		return fmt.Errorf("%s\nSuggestion: Ensure the command field is not null. Use one of these formats:\n  - String: \"npm start\"\n  - Array: [\"npm\", \"start\"]\n  - Object: {\"command\": \"npm\", \"args\": [\"start\"]}", baseMsg)
+	case map[string]interface{}:
+		return fmt.Errorf("%s\nSuggestion: Object format requires a 'command' field. Example:\n  {\"command\": \"npm\", \"args\": [\"start\"]}", baseMsg)
+	case []interface{}:
+		if arr := commandData.([]interface{}); len(arr) == 0 {
+			return fmt.Errorf("%s\nSuggestion: Array format cannot be empty. Example:\n  [\"npm\", \"start\"]", baseMsg)
+		}
+		return fmt.Errorf("%s\nSuggestion: Array format requires all elements to be strings. Example:\n  [\"npm\", \"start\", \"--port\", \"3000\"]", baseMsg)
+	case string:
+		if str := commandData.(string); str == "" {
+			return fmt.Errorf("%s\nSuggestion: String format cannot be empty. Example:\n  \"npm start\"", baseMsg)
+		}
+		return fmt.Errorf("%s\nSuggestion: Check for invalid characters in command string", baseMsg)
+	default:
+		return fmt.Errorf("%s\nSuggestion: Command must be a string, array, or object. Received type: %T\nValid formats:\n  - String: \"npm start\"\n  - Array: [\"npm\", \"start\"]\n  - Object: {\"command\": \"npm\", \"args\": [\"start\"]}", baseMsg, commandData)
+	}
+}
+
+// enhanceFormatValidationError provides more helpful error messages for format validation failures
+func (fd *FormatDetector) enhanceFormatValidationError(originalErr error, format CommandFormat, commandData interface{}) error {
+	baseMsg := fmt.Sprintf("format validation failed: %v", originalErr)
+
+	switch format {
+	case FormatString:
+		return fmt.Errorf("%s\nFormat: String\nSuggestion: Ensure the command string is not empty and contains valid characters.\nExample: \"npm run build --production\"", baseMsg)
+	case FormatArray:
+		return fmt.Errorf("%s\nFormat: Array\nSuggestion: Ensure all array elements are strings and the array is not empty.\nExample: [\"docker\", \"run\", \"-p\", \"8080:80\", \"nginx\"]", baseMsg)
+	case FormatObject:
+		return fmt.Errorf("%s\nFormat: Object\nSuggestion: Ensure the object has a 'command' field (string) and optional 'args' field (array of strings).\nExample: {\"command\": \"node\", \"args\": [\"server.js\", \"--port\", \"3000\"]}", baseMsg)
+	default:
+		return fmt.Errorf("%s\nUnknown format detected. This should not happen.", baseMsg)
+	}
 }
 
 // DetectConfigFormat analyzes an entire configuration and returns format information

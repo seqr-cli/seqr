@@ -444,7 +444,7 @@ func TestNormalizer_NormalizeConfig(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errorSubstr: "command 0 must be an object",
+			errorSubstr: "command must be an object",
 		},
 		{
 			name: "command with invalid name type",
@@ -458,7 +458,7 @@ func TestNormalizer_NormalizeConfig(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errorSubstr: "command 0 name must be a string",
+			errorSubstr: "name must be a string",
 		},
 		{
 			name: "command with invalid mode type",
@@ -472,7 +472,7 @@ func TestNormalizer_NormalizeConfig(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errorSubstr: "command 0 mode must be a string",
+			errorSubstr: "mode must be a string",
 		},
 		{
 			name: "command with invalid workDir type",
@@ -486,7 +486,7 @@ func TestNormalizer_NormalizeConfig(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errorSubstr: "command 0 workDir must be a string",
+			errorSubstr: "workDir must be a string",
 		},
 		{
 			name: "command with invalid env type",
@@ -500,7 +500,7 @@ func TestNormalizer_NormalizeConfig(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errorSubstr: "command 0 env must be an object",
+			errorSubstr: "env must be an object",
 		},
 		{
 			name: "command with invalid env value type",
@@ -516,7 +516,7 @@ func TestNormalizer_NormalizeConfig(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errorSubstr: "command 0 env value for key 'KEY' must be a string",
+			errorSubstr: "env value for key 'KEY' must be a string",
 		},
 		{
 			name: "command missing command field",
@@ -529,7 +529,7 @@ func TestNormalizer_NormalizeConfig(t *testing.T) {
 				},
 			},
 			wantErr:     true,
-			errorSubstr: "command 0 must have a 'command' field",
+			errorSubstr: "must have a 'command' field",
 		},
 	}
 

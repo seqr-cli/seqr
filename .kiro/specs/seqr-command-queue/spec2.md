@@ -70,7 +70,7 @@
 - [x] **1.1** Extend configuration parser to support object, array, and string formats
 - [x] **1.2** Implement format detection and validation
 - [x] **1.3** Create normalization to unified internal structure
-- [ ] **1.4** Add error handling for invalid formats
+- [x] **1.4** Add error handling for invalid formats
 - [ ] **1.5** Create unit tests for all supported formats
 
 ---
