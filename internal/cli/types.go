@@ -18,6 +18,7 @@ type CLIOptions struct {
 	Help       bool   // Show help message
 	Version    bool   // Show version information
 	Init       bool   // Generate example queue configuration files
+	Kill       bool   // Kill running seqr processes
 }
 
 // CLI represents the command-line interface
@@ -42,6 +43,7 @@ func NewCLI(args []string) *CLI {
 			Help:       false,
 			Version:    false,
 			Init:       false,
+			Kill:       false,
 		},
 		flagSet: flagSet,
 		args:    args,
@@ -67,6 +69,8 @@ func (c *CLI) setupFlags() {
 		"Show version information")
 	c.flagSet.BoolVar(&c.options.Init, "init", c.options.Init,
 		"Generate example queue configuration files")
+	c.flagSet.BoolVar(&c.options.Kill, "kill", c.options.Kill,
+		"Kill running seqr processes")
 }
 
 // Parse parses command-line arguments and validates options
@@ -80,8 +84,8 @@ func (c *CLI) Parse() error {
 
 // validateOptions validates the parsed command-line options
 func (c *CLI) validateOptions() error {
-	// If help, version, or init is requested, no validation needed
-	if c.options.Help || c.options.Version || c.options.Init {
+	// If help, version, init, or kill is requested, no validation needed
+	if c.options.Help || c.options.Version || c.options.Init || c.options.Kill {
 		return nil
 	}
 
@@ -112,6 +116,11 @@ func (c *CLI) ShouldRunInit() bool {
 	return c.options.Init
 }
 
+// ShouldRunKill returns true if kill should be executed
+func (c *CLI) ShouldRunKill() bool {
+	return c.options.Kill
+}
+
 // ShowVersion displays version information
 func (c *CLI) ShowVersion(version string) {
 	fmt.Fprintf(os.Stdout, "seqr version %s\n", version)
@@ -133,7 +142,8 @@ func (c *CLI) ShowHelp() {
 	fmt.Fprintf(os.Stdout, "  seqr -v                   # Run with verbose output\n")
 	fmt.Fprintf(os.Stdout, "  seqr --verbose            # Run with verbose output (long form)\n")
 	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v     # Custom file with verbose output\n")
-	fmt.Fprintf(os.Stdout, "  seqr --init               # Generate example configuration files\n\n")
+	fmt.Fprintf(os.Stdout, "  seqr --init               # Generate example configuration files\n")
+	fmt.Fprintf(os.Stdout, "  seqr --kill               # Kill running seqr processes\n\n")
 	fmt.Fprintf(os.Stdout, "CONFIGURATION:\n")
 	fmt.Fprintf(os.Stdout, "  The queue file should be a JSON file with the following structure:\n")
 	fmt.Fprintf(os.Stdout, "  {\n")
@@ -198,6 +208,13 @@ func (c *CLI) Run(ctx context.Context) error {
 func (c *CLI) RunInit() error {
 	generator := config.NewTemplateGenerator()
 	return generator.GenerateAllTemplates()
+}
+
+// RunKill terminates running seqr processes
+func (c *CLI) RunKill() error {
+	// TODO: Implement process termination logic in subsequent tasks
+	fmt.Fprintf(os.Stdout, "Kill functionality will be implemented in subsequent tasks\n")
+	return nil
 }
 
 // Stop gracefully stops the CLI execution

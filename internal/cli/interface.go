@@ -25,6 +25,12 @@ type Interface interface {
 	// RunInit generates example configuration files
 	RunInit() error
 
+	// ShouldRunKill returns true if kill should be executed
+	ShouldRunKill() bool
+
+	// RunKill terminates running seqr processes
+	RunKill() error
+
 	// Run executes the CLI application with the parsed options
 	Run(ctx context.Context) error
 

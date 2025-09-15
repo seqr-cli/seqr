@@ -160,7 +160,7 @@ Command Output → [Output Capture] → Live Stream + Verbose Log
 **How:** Send termination signals with escalation from graceful to forced termination
 
 ### Tasks
-- [ ] **4.1** Add --kill flag to CLI interface
+- [x] **4.1** Add --kill flag to CLI interface
 - [ ] **4.2** Implement process tracking for running executions
 - [ ] **4.3** Add graceful shutdown with SIGTERM
 - [ ] **4.4** Implement force termination with SIGKILL after timeout
