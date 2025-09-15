@@ -1,10 +1,13 @@
 package config
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // TemplateGenerator handles creation of example configuration files
@@ -78,8 +81,27 @@ func (tg *TemplateGenerator) writeTemplate(filename, content, description string
 
 	// Check if file already exists
 	if _, err := os.Stat(fullPath); err == nil {
-		fmt.Printf("⚠️  %s already exists, skipping...\n", filename)
-		return nil
+		action, err := tg.promptForFileConflict(filename)
+		if err != nil {
+			return fmt.Errorf("failed to get user input: %w", err)
+		}
+
+		switch action {
+		case "skip":
+			fmt.Printf("⏭️  Skipped %s (file already exists)\n", filename)
+			return nil
+		case "overwrite":
+			fmt.Printf("🔄 Overwriting %s...\n", filename)
+			// Continue to write the file
+		case "backup":
+			if err := tg.createBackup(fullPath); err != nil {
+				return fmt.Errorf("failed to create backup: %w", err)
+			}
+			fmt.Printf("💾 Created backup and overwriting %s...\n", filename)
+			// Continue to write the file
+		default:
+			return fmt.Errorf("invalid action: %s", action)
+		}
 	}
 
 	// Write the file
@@ -88,6 +110,83 @@ func (tg *TemplateGenerator) writeTemplate(filename, content, description string
 	}
 
 	fmt.Printf("✅ Created %s\n   %s\n", filename, description)
+	return nil
+}
+
+// promptForFileConflict prompts the user for action when a file already exists
+func (tg *TemplateGenerator) promptForFileConflict(filename string) (string, error) {
+	fmt.Printf("\n⚠️  File '%s' already exists.\n", filename)
+	fmt.Printf("What would you like to do?\n")
+	fmt.Printf("  [s] Skip this file (keep existing)\n")
+	fmt.Printf("  [o] Overwrite existing file\n")
+	fmt.Printf("  [b] Backup existing file and create new one\n")
+	fmt.Printf("Choice (s/o/b): ")
+
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			// Handle EOF (non-interactive mode) by defaulting to skip
+			if err == io.EOF {
+				fmt.Printf("s (defaulting to skip in non-interactive mode)\n")
+				return "skip", nil
+			}
+			return "", fmt.Errorf("failed to read input: %w", err)
+		}
+
+		choice := strings.ToLower(strings.TrimSpace(input))
+		switch choice {
+		case "s", "skip":
+			return "skip", nil
+		case "o", "overwrite":
+			return "overwrite", nil
+		case "b", "backup":
+			return "backup", nil
+		case "":
+			// Default to skip on empty input
+			return "skip", nil
+		default:
+			fmt.Printf("Invalid choice '%s'. Please enter 's' (skip), 'o' (overwrite), or 'b' (backup): ", choice)
+		}
+	}
+}
+
+// createBackup creates a backup of the existing file with timestamp
+func (tg *TemplateGenerator) createBackup(filePath string) error {
+	// Read existing file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to read existing file: %w", err)
+	}
+
+	// Create backup filename with timestamp
+	dir := filepath.Dir(filePath)
+	base := filepath.Base(filePath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+
+	// Use a simple counter-based backup naming to avoid timestamp complexity
+	backupPath := filepath.Join(dir, fmt.Sprintf("%s.backup%s", name, ext))
+
+	// If backup already exists, try with numbers
+	counter := 1
+	for {
+		if _, err := os.Stat(backupPath); os.IsNotExist(err) {
+			break
+		}
+		backupPath = filepath.Join(dir, fmt.Sprintf("%s.backup%d%s", name, counter, ext))
+		counter++
+		if counter > 100 { // Prevent infinite loop
+			return fmt.Errorf("too many backup files exist")
+		}
+	}
+
+	// Write backup file
+	if err := os.WriteFile(backupPath, content, 0644); err != nil {
+		return fmt.Errorf("failed to write backup file: %w", err)
+	}
+
+	fmt.Printf("📁 Backup created: %s\n", filepath.Base(backupPath))
 	return nil
 }
 
