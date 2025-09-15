@@ -1,0 +1,52 @@
+{
+  "commands": [
+    {
+      "command": [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        "redis",
+        "-p",
+        "6379:6379",
+        "redis:alpine"
+      ],
+      "mode": "keepAlive",
+      "name": "setup-docker"
+    },
+    {
+      "command": [
+        "sleep",
+        "2"
+      ],
+      "mode": "once",
+      "name": "wait-for-redis"
+    },
+    {
+      "command": [
+        "npm",
+        "test",
+        "--",
+        "--coverage"
+      ],
+      "mode": "once",
+      "name": "run-tests",
+      "workDir": "./backend"
+    },
+    {
+      "command": [
+        "node",
+        "server.js",
+        "--port",
+        "8080"
+      ],
+      "env": {
+        "REDIS_URL": "redis://localhost:6379"
+      },
+      "mode": "keepAlive",
+      "name": "start-app",
+      "workDir": "./backend"
+    }
+  ],
+  "version": "1.0"
+}

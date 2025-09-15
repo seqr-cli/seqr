@@ -1,0 +1,24 @@
+{
+  "commands": [
+    {
+      "command": "npm install",
+      "mode": "once",
+      "name": "install-deps"
+    },
+    {
+      "command": "npm run build",
+      "mode": "once",
+      "name": "build-project"
+    },
+    {
+      "command": "npm start",
+      "env": {
+        "NODE_ENV": "production",
+        "PORT": "3000"
+      },
+      "mode": "keepAlive",
+      "name": "start-server"
+    }
+  ],
+  "version": "1.0"
+}

@@ -1,0 +1,90 @@
+{
+  "commands": [
+    {
+      "command": [
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        "dev-postgres",
+        "-p",
+        "5432:5432",
+        "postgres:13"
+      ],
+      "env": {
+        "POSTGRES_DB": "fullstack_app",
+        "POSTGRES_PASSWORD": "devpass"
+      },
+      "mode": "keepAlive",
+      "name": "setup-database"
+    },
+    {
+      "command": "docker run -d --name dev-redis -p 6379:6379 redis:alpine",
+      "mode": "keepAlive",
+      "name": "setup-redis"
+    },
+    {
+      "command": [
+        "sleep",
+        "5"
+      ],
+      "mode": "once",
+      "name": "wait-for-services"
+    },
+    {
+      "command": {
+        "args": [
+          "install"
+        ],
+        "command": "npm"
+      },
+      "mode": "once",
+      "name": "install-backend-deps",
+      "workDir": "./backend"
+    },
+    {
+      "command": "npm install",
+      "mode": "once",
+      "name": "install-frontend-deps",
+      "workDir": "./frontend"
+    },
+    {
+      "command": [
+        "npm",
+        "run",
+        "db:migrate"
+      ],
+      "mode": "once",
+      "name": "run-migrations",
+      "workDir": "./backend"
+    },
+    {
+      "command": {
+        "args": [
+          "run",
+          "dev"
+        ],
+        "command": "npm"
+      },
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:devpass@localhost:5432/fullstack_app",
+        "NODE_ENV": "development",
+        "PORT": "3001",
+        "REDIS_URL": "redis://localhost:6379"
+      },
+      "mode": "keepAlive",
+      "name": "start-backend",
+      "workDir": "./backend"
+    },
+    {
+      "command": "npm run dev",
+      "env": {
+        "VITE_API_URL": "http://localhost:3001"
+      },
+      "mode": "keepAlive",
+      "name": "start-frontend",
+      "workDir": "./frontend"
+    }
+  ],
+  "version": "1.0"
+}

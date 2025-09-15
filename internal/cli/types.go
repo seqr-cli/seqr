@@ -196,11 +196,8 @@ func (c *CLI) Run(ctx context.Context) error {
 
 // RunInit generates example configuration files
 func (c *CLI) RunInit() error {
-	// This is a placeholder implementation for task 3.1
-	// The actual template generation will be implemented in task 3.2
-	fmt.Fprintf(os.Stdout, "Init functionality will be implemented in the next task.\n")
-	fmt.Fprintf(os.Stdout, "This will generate example .queue.json files with different configuration formats.\n")
-	return nil
+	generator := config.NewTemplateGenerator()
+	return generator.GenerateAllTemplates()
 }
 
 // Stop gracefully stops the CLI execution

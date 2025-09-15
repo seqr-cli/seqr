@@ -1,0 +1,63 @@
+{
+  "commands": [
+    {
+      "command": {
+        "args": [
+          "run",
+          "-d",
+          "--name",
+          "postgres",
+          "-p",
+          "5432:5432",
+          "postgres:13"
+        ],
+        "command": "docker"
+      },
+      "env": {
+        "POSTGRES_DB": "myapp",
+        "POSTGRES_PASSWORD": "devpass"
+      },
+      "mode": "keepAlive",
+      "name": "database-setup"
+    },
+    {
+      "command": {
+        "args": [
+          "3"
+        ],
+        "command": "sleep"
+      },
+      "mode": "once",
+      "name": "wait-for-db"
+    },
+    {
+      "command": {
+        "args": [
+          "run",
+          "db:migrate"
+        ],
+        "command": "npm"
+      },
+      "mode": "once",
+      "name": "run-migrations",
+      "workDir": "./api"
+    },
+    {
+      "command": {
+        "args": [
+          "run",
+          "dev"
+        ],
+        "command": "npm"
+      },
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:devpass@localhost:5432/myapp",
+        "NODE_ENV": "development"
+      },
+      "mode": "keepAlive",
+      "name": "start-api",
+      "workDir": "./api"
+    }
+  ],
+  "version": "1.0"
+}

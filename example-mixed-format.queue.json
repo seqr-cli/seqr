@@ -1,0 +1,44 @@
+{
+  "commands": [
+    {
+      "command": "echo Hello from string format!",
+      "mode": "once",
+      "name": "simple-echo"
+    },
+    {
+      "command": [
+        "ls",
+        "-la"
+      ],
+      "mode": "once",
+      "name": "list-files"
+    },
+    {
+      "command": {
+        "args": [
+          "run",
+          "--rm",
+          "-v",
+          "${PWD}:/workspace",
+          "alpine",
+          "echo",
+          "Hello from object format!"
+        ],
+        "command": "docker"
+      },
+      "mode": "once",
+      "name": "complex-docker"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "http.server",
+        "8000"
+      ],
+      "mode": "keepAlive",
+      "name": "background-service"
+    }
+  ],
+  "version": "1.0"
+}
