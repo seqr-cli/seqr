@@ -260,7 +260,7 @@ func TestParseJSON(t *testing.T) {
 				]
 			}`,
 			wantErr:     true,
-			errorSubstr: "invalid mode",
+			errorSubstr: "mode must be either 'once' or 'keepAlive'",
 		},
 		{
 			name: "type mismatch",

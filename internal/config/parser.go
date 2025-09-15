@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,25 +69,14 @@ func ParseJSON(data []byte) (*Config, error) {
 		return nil, fmt.Errorf("invalid configuration format detected")
 	}
 
-	var config Config
-
-	if err := json.Unmarshal(data, &config); err != nil {
-		switch err := err.(type) {
-		case *json.SyntaxError:
-			return nil, fmt.Errorf("JSON syntax error at byte offset %d: %w", err.Offset, err)
-		case *json.UnmarshalTypeError:
-			return nil, fmt.Errorf("JSON type error: cannot unmarshal %s into field '%s' of type %s",
-				err.Value, err.Field, err.Type)
-		default:
-			return nil, fmt.Errorf("failed to parse JSON: %w", err)
-		}
+	// Use the normalizer to handle all format variations
+	normalizer := NewNormalizer()
+	config, err := normalizer.NormalizeFromJSON(data)
+	if err != nil {
+		return nil, fmt.Errorf("normalization failed: %w", err)
 	}
 
-	if err := config.Validate(); err != nil {
-		return nil, fmt.Errorf("configuration validation failed: %w", err)
-	}
-
-	return &config, nil
+	return config, nil
 }
 
 // ParseJSONWithFormatInfo parses JSON data and returns both the config and format information
@@ -108,25 +96,14 @@ func ParseJSONWithFormatInfo(data []byte) (*Config, *ConfigFormatInfo, error) {
 		return nil, nil, fmt.Errorf("invalid configuration format detected")
 	}
 
-	var config Config
-
-	if err := json.Unmarshal(data, &config); err != nil {
-		switch err := err.(type) {
-		case *json.SyntaxError:
-			return nil, nil, fmt.Errorf("JSON syntax error at byte offset %d: %w", err.Offset, err)
-		case *json.UnmarshalTypeError:
-			return nil, nil, fmt.Errorf("JSON type error: cannot unmarshal %s into field '%s' of type %s",
-				err.Value, err.Field, err.Type)
-		default:
-			return nil, nil, fmt.Errorf("failed to parse JSON: %w", err)
-		}
+	// Use the normalizer to handle all format variations
+	normalizer := NewNormalizer()
+	config, err := normalizer.NormalizeFromJSON(data)
+	if err != nil {
+		return nil, nil, fmt.Errorf("normalization failed: %w", err)
 	}
 
-	if err := config.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("configuration validation failed: %w", err)
-	}
-
-	return &config, formatInfo, nil
+	return config, formatInfo, nil
 }
 
 func DefaultConfigFile() string {
