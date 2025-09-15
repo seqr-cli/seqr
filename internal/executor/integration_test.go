@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -15,6 +16,14 @@ func TestExecutorProcessTracking(t *testing.T) {
 	// Clean up any existing tracking file
 	defer os.Remove(executor.tracker.filePath)
 
+	// Create ping arguments based on platform
+	var pingArgs []string
+	if runtime.GOOS == "windows" {
+		pingArgs = []string{"127.0.0.1", "-n", "10"}
+	} else {
+		pingArgs = []string{"127.0.0.1", "-c", "10"}
+	}
+
 	// Create a config with a keepAlive command
 	cfg := &config.Config{
 		Version: "1.0",
@@ -22,7 +31,7 @@ func TestExecutorProcessTracking(t *testing.T) {
 			{
 				Name:    "test-tracking",
 				Command: "ping",
-				Args:    []string{"127.0.0.1", "-n", "10"},
+				Args:    pingArgs,
 				Mode:    config.ModeKeepAlive,
 			},
 		},
@@ -88,13 +97,21 @@ func TestProcessTrackerPersistence(t *testing.T) {
 	executor1 := NewExecutor(false)
 	defer os.Remove(executor1.tracker.filePath)
 
+	// Create ping arguments based on platform
+	var pingArgs []string
+	if runtime.GOOS == "windows" {
+		pingArgs = []string{"127.0.0.1", "-n", "5"}
+	} else {
+		pingArgs = []string{"127.0.0.1", "-c", "5"}
+	}
+
 	cfg := &config.Config{
 		Version: "1.0",
 		Commands: []config.Command{
 			{
 				Name:    "test-persistence",
 				Command: "ping",
-				Args:    []string{"127.0.0.1", "-n", "5"},
+				Args:    pingArgs,
 				Mode:    config.ModeKeepAlive,
 			},
 		},
