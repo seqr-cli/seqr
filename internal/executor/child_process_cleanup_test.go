@@ -187,11 +187,5 @@ func TestProcessGroupConfiguration(t *testing.T) {
 		t.Error("SysProcAttr should be set after configureProcessGroup")
 	}
 
-	if runtime.GOOS == "windows" {
-		// On Windows, check for CREATE_NEW_PROCESS_GROUP flag
-		if cmd.SysProcAttr.CreationFlags == 0 {
-			t.Error("CreationFlags should be set on Windows")
-		}
-	}
-	// Note: Unix-specific checks are in platform-specific test files
+	// Note: Platform-specific checks are in platform-specific test files
 }

@@ -1,6 +1,6 @@
 # seqr
 
-Run commands in sequence. Perfect for development workflows.
+AI-Safe Command Queue Runner. Execute commands sequentially from a JSON configuration file. Supports both one-time commands and long-running background processes.
 
 ## Installation
 
@@ -20,17 +20,39 @@ curl -sSL https://raw.githubusercontent.com/seqr-cli/seqr/main/install.sh | bash
 # Build
 go build -o seqr ./cmd/seqr
 
-# Run with default .queue.json
+# Create a new .queue.json file
+./seqr --init
+
+# Run commands from .queue.json
 ./seqr
 
-# Run with custom file
-./seqr --file my-queue.json
+# Run commands from custom file
+./seqr -f my-queue.json
+
+# Run with verbose output
+./seqr -v
+
+# Custom file with verbose output
+./seqr -f queue.json -v
+
+# Show status of running processes
+./seqr --status
+
+# Kill all running processes
+./seqr --kill
+
+# Show help
+./seqr --help
+
+# Show version
+./seqr --version
 ```
 
 ## Configuration
 
-Create a `.queue.json` file:
+Create a `.queue.json` file. The configuration supports several formats:
 
+### Full Format
 ```json
 {
   "version": "1.0",
@@ -56,11 +78,18 @@ Create a `.queue.json` file:
       "workDir": "./backend",
       "env": {
         "NODE_ENV": "development"
-      }
+      },
+      "concurrent": false
     }
   ]
 }
 ```
+
+### Simple Formats
+- **Array of commands**: `[{"command": "echo", "args": ["hello"]}]`
+- **Single command**: `{"command": "echo", "args": ["hello"]}`
+- **Simple string**: `"echo hello"`
+- **Array of strings**: `["echo hello", "echo world"]`
 
 ## Modes
 
@@ -70,8 +99,19 @@ Create a `.queue.json` file:
 ## Options
 
 - `workDir`: Working directory for command
-- `env`: Environment variables
-- `args`: Command arguments
+- `env`: Environment variables (object)
+- `args`: Command arguments (array)
+- `concurrent`: Run command concurrently with others (boolean, default: false)
+
+## CLI Flags
+
+- `-f, --file`: Path to queue configuration file (default: .queue.json)
+- `-v, --verbose`: Enable verbose output with execution details
+- `-h, --help`: Show help message
+- `--version`: Show version information
+- `--init`: Generate example queue configuration files
+- `--kill`: Kill running seqr processes
+- `--status`: Show status of running seqr processes
 
 ## Development
 

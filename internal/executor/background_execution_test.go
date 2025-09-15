@@ -38,14 +38,14 @@ func TestBackgroundProcessExecution(t *testing.T) {
 			name: "multiple keepAlive commands",
 			commands: []config.Command{
 				{
-					Name:    "background-timeout-1",
-					Command: "timeout",
+					Name:    "background-sleep-1",
+					Command: "sleep",
 					Args:    []string{"5"},
 					Mode:    config.ModeKeepAlive,
 				},
 				{
-					Name:    "background-timeout-2",
-					Command: "timeout",
+					Name:    "background-sleep-2",
+					Command: "sleep",
 					Args:    []string{"5"},
 					Mode:    config.ModeKeepAlive,
 				},
@@ -70,7 +70,7 @@ func TestBackgroundProcessExecution(t *testing.T) {
 				},
 				{
 					Name:    "background-service",
-					Command: "timeout",
+					Command: "sleep",
 					Args:    []string{"8"},
 					Mode:    config.ModeKeepAlive,
 				},
@@ -193,7 +193,7 @@ func TestBackgroundProcessTracking(t *testing.T) {
 		Commands: []config.Command{
 			{
 				Name:    "tracked-service",
-				Command: "timeout",
+				Command: "sleep",
 				Args:    []string{"3"},
 				Mode:    config.ModeKeepAlive,
 			},
