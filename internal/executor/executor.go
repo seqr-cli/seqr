@@ -24,15 +24,20 @@ type Executor struct {
 	processes       map[string]*exec.Cmd
 	reporter        Reporter
 	tracker         *ProcessTracker
+	monitor         *ProcessMonitor
 	streamingActive map[string]context.CancelFunc // Track active streaming sessions
 }
 
 func NewExecutor(verbose bool) *Executor {
+	tracker := NewProcessTracker()
+	monitor := NewProcessMonitor(verbose, tracker)
+
 	return &Executor{
 		verbose:         verbose,
 		processes:       make(map[string]*exec.Cmd),
 		reporter:        NewConsoleReporter(os.Stdout, verbose),
-		tracker:         NewProcessTracker(),
+		tracker:         tracker,
+		monitor:         monitor,
 		streamingActive: make(map[string]context.CancelFunc),
 		status: ExecutionStatus{
 			State:   StateReady,
@@ -54,6 +59,13 @@ func (e *Executor) Execute(ctx context.Context, cfg *config.Config) error {
 	}
 	e.stopped = false
 	e.mu.Unlock()
+
+	// Start process monitoring
+	e.monitor.StartMonitoring(ctx)
+	defer e.monitor.StopMonitoring()
+
+	// Start monitoring status changes in a separate goroutine
+	go e.handleStatusChanges(ctx)
 
 	e.reporter.ReportStart(len(cfg.Commands))
 
@@ -330,6 +342,9 @@ func (e *Executor) executeKeepAlive(execCmd *exec.Cmd, result ExecutionResult, n
 		fmt.Printf("[%s] [%s] [process] Warning: Failed to track process: %v\n", timestamp, name, err)
 	}
 
+	// Add process to monitoring
+	e.monitor.AddProcess(execCmd.Process.Pid, name)
+
 	go e.monitorProcess(name, execCmd)
 
 	result.Success = true
@@ -386,6 +401,9 @@ func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result 
 		timestamp := time.Now().Format("15:04:05.000")
 		fmt.Printf("[%s] [%s] [process] Warning: Failed to track process: %v\n", timestamp, name, err)
 	}
+
+	// Add process to monitoring
+	e.monitor.AddProcess(execCmd.Process.Pid, name)
 
 	// Create streaming context that can be cancelled independently of process lifecycle
 	streamCtx, streamCancel := context.WithCancel(context.Background())
@@ -535,12 +553,28 @@ func (e *Executor) monitorProcess(name string, cmd *exec.Cmd) {
 	delete(e.processes, name)
 	e.mu.Unlock()
 
-	// Remove from process tracker
+	// Remove from process tracker and monitoring
 	if cmd.Process != nil {
-		if trackErr := e.tracker.RemoveProcess(cmd.Process.Pid); trackErr != nil && e.verbose {
+		pid := cmd.Process.Pid
+
+		// Check if this was an unexpected termination
+		if err != nil {
+			exitCode := -1
+			if exitError, ok := err.(*exec.ExitError); ok {
+				exitCode = exitError.ExitCode()
+			}
+			// Notify monitor of unexpected termination
+			e.monitor.NotifyUnexpectedTermination(pid, name, exitCode, err)
+		}
+
+		// Remove from tracking
+		if trackErr := e.tracker.RemoveProcess(pid); trackErr != nil && e.verbose {
 			timestamp := time.Now().Format("15:04:05.000")
 			fmt.Printf("[%s] [%s] [process] Warning: Failed to untrack process: %v\n", timestamp, name, trackErr)
 		}
+
+		// Remove from monitoring
+		e.monitor.RemoveProcess(pid)
 	}
 
 	if e.verbose {
@@ -569,12 +603,28 @@ func (e *Executor) monitorProcessWithStreaming(name string, cmd *exec.Cmd, strea
 	delete(e.streamingActive, name) // Clean up streaming tracking
 	e.mu.Unlock()
 
-	// Remove from process tracker
+	// Remove from process tracker and monitoring
 	if cmd.Process != nil {
-		if trackErr := e.tracker.RemoveProcess(cmd.Process.Pid); trackErr != nil && e.verbose {
+		pid := cmd.Process.Pid
+
+		// Check if this was an unexpected termination
+		if err != nil {
+			exitCode := -1
+			if exitError, ok := err.(*exec.ExitError); ok {
+				exitCode = exitError.ExitCode()
+			}
+			// Notify monitor of unexpected termination
+			e.monitor.NotifyUnexpectedTermination(pid, name, exitCode, err)
+		}
+
+		// Remove from tracking
+		if trackErr := e.tracker.RemoveProcess(pid); trackErr != nil && e.verbose {
 			timestamp := time.Now().Format("15:04:05.000")
 			fmt.Printf("[%s] [%s] [process] Warning: Failed to untrack process: %v\n", timestamp, name, trackErr)
 		}
+
+		// Remove from monitoring
+		e.monitor.RemoveProcess(pid)
 	}
 
 	if e.verbose {
@@ -607,6 +657,9 @@ func (e *Executor) Stop() {
 
 	for name, cmd := range e.processes {
 		if cmd.Process != nil {
+			// Mark this as an expected exit since we're stopping it
+			e.monitor.MarkExpectedExit(cmd.Process.Pid)
+
 			if e.verbose {
 				timestamp := time.Now().Format("15:04:05.000")
 				fmt.Printf("[%s] [%s] [process] Gracefully terminating process (PID %d)\n", timestamp, name, cmd.Process.Pid)
@@ -959,6 +1012,52 @@ func (e *Executor) forceKillProcessGroupWithTimeout(process *os.Process, name st
 			fmt.Printf("[%s] [%s] [process] Warning: Force kill timeout on process group (PID %d) - processes may be in uninterruptible state\n", timestamp, name, process.Pid)
 		}
 	}
+}
+
+// handleStatusChanges processes status change notifications from the monitor
+func (e *Executor) handleStatusChanges(ctx context.Context) {
+	statusChanges := e.monitor.GetStatusChanges()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case change := <-statusChanges:
+			// Handle the status change
+			e.processStatusChange(change)
+		}
+	}
+}
+
+// processStatusChange processes a single status change notification
+func (e *Executor) processStatusChange(change ProcessStatusChange) {
+	// For now, we mainly log unexpected terminations
+	// The monitor already handles logging, but we could add additional logic here
+	// such as restarting processes, sending alerts, etc.
+
+	if change.Unexpected && (change.NewStatus == ProcessStatusCrashed || change.NewStatus == ProcessStatusExited) {
+		// This is an unexpected termination - the monitor already logged it
+		// We could add additional handling here if needed, such as:
+		// - Attempting to restart the process
+		// - Sending notifications to external systems
+		// - Updating execution status
+
+		// For now, we'll just ensure the process is cleaned up from our tracking
+		e.mu.Lock()
+		// Remove from our internal processes map if it's still there
+		for name, cmd := range e.processes {
+			if cmd.Process != nil && cmd.Process.Pid == change.PID {
+				delete(e.processes, name)
+				break
+			}
+		}
+		e.mu.Unlock()
+	}
+}
+
+// GetProcessMonitor returns the process monitor for external access
+func (e *Executor) GetProcessMonitor() *ProcessMonitor {
+	return e.monitor
 }
 
 // groupCommandsByConcurrency groups commands into execution groups based on concurrent flag

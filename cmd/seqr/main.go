@@ -50,6 +50,14 @@ func main() {
 		os.Exit(0)
 	}
 
+	if cliApp.ShouldRunStatus() {
+		if err := cliApp.RunStatus(); err != nil {
+			os.Stderr.WriteString("Error: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

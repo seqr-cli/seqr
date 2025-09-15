@@ -197,5 +197,5 @@ Commands → [Process Manager] → Background Processes + Live Output Stream
 - [x] **5.2** Add real-time output streaming during execution
 - [x] **5.3** Allow exit from streaming while keeping processes running
 - [x] **5.4** Support concurrent command execution
-- [ ] **5.5** Add process monitoring and status notifications
+- [x] **5.5** Add process monitoring and status notifications
 - [ ] **5.6** Test background processes with live streaming

@@ -31,6 +31,12 @@ type Interface interface {
 	// RunKill terminates running seqr processes
 	RunKill() error
 
+	// ShouldRunStatus returns true if status should be executed
+	ShouldRunStatus() bool
+
+	// RunStatus shows the status of running seqr processes
+	RunStatus() error
+
 	// Run executes the CLI application with the parsed options
 	Run(ctx context.Context) error
 

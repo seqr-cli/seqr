@@ -19,6 +19,7 @@ type CLIOptions struct {
 	Version    bool   // Show version information
 	Init       bool   // Generate example queue configuration files
 	Kill       bool   // Kill running seqr processes
+	Status     bool   // Show status of running seqr processes
 }
 
 // CLI represents the command-line interface
@@ -44,6 +45,7 @@ func NewCLI(args []string) *CLI {
 			Version:    false,
 			Init:       false,
 			Kill:       false,
+			Status:     false,
 		},
 		flagSet: flagSet,
 		args:    args,
@@ -71,6 +73,8 @@ func (c *CLI) setupFlags() {
 		"Generate example queue configuration files")
 	c.flagSet.BoolVar(&c.options.Kill, "kill", c.options.Kill,
 		"Kill running seqr processes")
+	c.flagSet.BoolVar(&c.options.Status, "status", c.options.Status,
+		"Show status of running seqr processes")
 }
 
 // Parse parses command-line arguments and validates options
@@ -84,8 +88,8 @@ func (c *CLI) Parse() error {
 
 // validateOptions validates the parsed command-line options
 func (c *CLI) validateOptions() error {
-	// If help, version, init, or kill is requested, no validation needed
-	if c.options.Help || c.options.Version || c.options.Init || c.options.Kill {
+	// If help, version, init, kill, or status is requested, no validation needed
+	if c.options.Help || c.options.Version || c.options.Init || c.options.Kill || c.options.Status {
 		return nil
 	}
 
@@ -121,6 +125,11 @@ func (c *CLI) ShouldRunKill() bool {
 	return c.options.Kill
 }
 
+// ShouldRunStatus returns true if status should be executed
+func (c *CLI) ShouldRunStatus() bool {
+	return c.options.Status
+}
+
 // ShowVersion displays version information
 func (c *CLI) ShowVersion(version string) {
 	fmt.Fprintf(os.Stdout, "seqr version %s\n", version)
@@ -143,7 +152,8 @@ func (c *CLI) ShowHelp() {
 	fmt.Fprintf(os.Stdout, "  seqr --verbose            # Run with verbose output (long form)\n")
 	fmt.Fprintf(os.Stdout, "  seqr -f queue.json -v     # Custom file with verbose output\n")
 	fmt.Fprintf(os.Stdout, "  seqr --init               # Generate example configuration files\n")
-	fmt.Fprintf(os.Stdout, "  seqr --kill               # Kill running seqr processes\n\n")
+	fmt.Fprintf(os.Stdout, "  seqr --kill               # Kill running seqr processes\n")
+	fmt.Fprintf(os.Stdout, "  seqr --status             # Show status of running seqr processes\n\n")
 	fmt.Fprintf(os.Stdout, "CONFIGURATION:\n")
 	fmt.Fprintf(os.Stdout, "  The queue file should be a JSON file with the following structure:\n")
 	fmt.Fprintf(os.Stdout, "  {\n")
@@ -246,6 +256,44 @@ func (c *CLI) RunKill() error {
 	}
 
 	fmt.Fprintf(os.Stdout, "All seqr processes have been terminated\n")
+	return nil
+}
+
+// RunStatus shows the status of running seqr processes
+func (c *CLI) RunStatus() error {
+	processManager := executor.NewProcessManager()
+
+	// Get all running processes
+	processes, err := processManager.GetAllRunningProcesses()
+	if err != nil {
+		return fmt.Errorf("failed to get running processes: %w", err)
+	}
+
+	if len(processes) == 0 {
+		fmt.Fprintf(os.Stdout, "No seqr processes are currently running\n")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stdout, "seqr Process Status\n")
+	fmt.Fprintf(os.Stdout, "==================\n\n")
+	fmt.Fprintf(os.Stdout, "Found %d running seqr process(es):\n\n", len(processes))
+
+	for pid, info := range processes {
+		uptime := time.Since(info.StartTime)
+		fmt.Fprintf(os.Stdout, "PID %d: %s\n", pid, info.Name)
+		fmt.Fprintf(os.Stdout, "  Command: %s %v\n", info.Command, info.Args)
+		fmt.Fprintf(os.Stdout, "  Mode: %s\n", info.Mode)
+		if info.WorkDir != "" {
+			fmt.Fprintf(os.Stdout, "  Working Directory: %s\n", info.WorkDir)
+		}
+		fmt.Fprintf(os.Stdout, "  Started: %s (%s ago)\n",
+			info.StartTime.Format("2006-01-02 15:04:05"),
+			uptime.Round(time.Second))
+		fmt.Fprintf(os.Stdout, "  Status: Running\n")
+		fmt.Fprintf(os.Stdout, "\n")
+	}
+
+	fmt.Fprintf(os.Stdout, "Use 'seqr --kill' to terminate all processes\n")
 	return nil
 }
 
