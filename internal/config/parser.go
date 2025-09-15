@@ -53,7 +53,7 @@ func LoadFromFile(filename string) (*Config, error) {
 	return config, nil
 }
 
-// ParseJSON parses JSON data into a Config struct
+// ParseJSON parses JSON data into a Config struct, supporting multiple command formats
 func ParseJSON(data []byte) (*Config, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("configuration data is empty")
