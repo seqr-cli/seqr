@@ -161,7 +161,7 @@ Command Output → [Output Capture] → Live Stream + Verbose Log
 
 ### Tasks
 - [x] **4.1** Add --kill flag to CLI interface
-- [ ] **4.2** Implement process tracking for running executions
+- [x] **4.2** Implement process tracking for running executions
 - [ ] **4.3** Add graceful shutdown with SIGTERM
 - [ ] **4.4** Implement force termination with SIGKILL after timeout
 - [ ] **4.5** Ensure cleanup of all child processes

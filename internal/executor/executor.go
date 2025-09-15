@@ -21,6 +21,7 @@ type Executor struct {
 	stopped   bool
 	processes map[string]*exec.Cmd
 	reporter  Reporter
+	tracker   *ProcessTracker
 }
 
 func NewExecutor(verbose bool) *Executor {
@@ -28,6 +29,7 @@ func NewExecutor(verbose bool) *Executor {
 		verbose:   verbose,
 		processes: make(map[string]*exec.Cmd),
 		reporter:  NewConsoleReporter(os.Stdout, verbose),
+		tracker:   NewProcessTracker(),
 		status: ExecutionStatus{
 			State:   StateReady,
 			Results: make([]ExecutionResult, 0),
@@ -294,6 +296,19 @@ func (e *Executor) executeKeepAlive(execCmd *exec.Cmd, result ExecutionResult, n
 	e.processes[name] = execCmd
 	e.mu.Unlock()
 
+	// Track the process for kill functionality
+	if err := e.tracker.AddProcess(
+		execCmd.Process.Pid,
+		name,
+		result.Command.Command,
+		result.Command.Args,
+		result.Command.WorkDir,
+		string(result.Command.Mode),
+	); err != nil && e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [%s] [process] Warning: Failed to track process: %v\n", timestamp, name, err)
+	}
+
 	go e.monitorProcess(name, execCmd)
 
 	result.Success = true
@@ -337,6 +352,19 @@ func (e *Executor) executeKeepAliveWithRealTimeOutput(execCmd *exec.Cmd, result 
 	e.mu.Lock()
 	e.processes[name] = execCmd
 	e.mu.Unlock()
+
+	// Track the process for kill functionality
+	if err := e.tracker.AddProcess(
+		execCmd.Process.Pid,
+		name,
+		result.Command.Command,
+		result.Command.Args,
+		result.Command.WorkDir,
+		string(result.Command.Mode),
+	); err != nil && e.verbose {
+		timestamp := time.Now().Format("15:04:05.000")
+		fmt.Printf("[%s] [%s] [process] Warning: Failed to track process: %v\n", timestamp, name, err)
+	}
 
 	// Start streaming output in background goroutines with proper lifecycle management
 	var streamWg sync.WaitGroup
@@ -419,6 +447,14 @@ func (e *Executor) monitorProcess(name string, cmd *exec.Cmd) {
 	delete(e.processes, name)
 	e.mu.Unlock()
 
+	// Remove from process tracker
+	if cmd.Process != nil {
+		if trackErr := e.tracker.RemoveProcess(cmd.Process.Pid); trackErr != nil && e.verbose {
+			timestamp := time.Now().Format("15:04:05.000")
+			fmt.Printf("[%s] [%s] [process] Warning: Failed to untrack process: %v\n", timestamp, name, trackErr)
+		}
+	}
+
 	if e.verbose {
 		timestamp := time.Now().Format("15:04:05.000")
 		if err != nil {
@@ -491,4 +527,24 @@ func (e *Executor) updateCompletedCount(count int) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.status.CompletedCount = count
+}
+
+// GetTrackedProcesses returns all currently tracked processes
+func (e *Executor) GetTrackedProcesses() map[int]*ProcessInfo {
+	return e.tracker.GetAllProcesses()
+}
+
+// GetTrackedProcess returns information about a specific tracked process
+func (e *Executor) GetTrackedProcess(pid int) (*ProcessInfo, bool) {
+	return e.tracker.GetProcess(pid)
+}
+
+// CleanupDeadProcesses removes dead processes from tracking
+func (e *Executor) CleanupDeadProcesses() error {
+	return e.tracker.CleanupDeadProcesses()
+}
+
+// GetTrackedProcessCount returns the number of currently tracked processes
+func (e *Executor) GetTrackedProcessCount() int {
+	return e.tracker.GetRunningProcessCount()
 }
